@@ -2,7 +2,7 @@
 
 一个 Windows 桌面端控制面板，用于运行和管理本地 llama.cpp 推理服务。内置聊天界面，支持 OpenAI 兼容 API、多模态附件、MCP 工具协议和自定义助手系统。
 
-> 基于 [Qiao-920/llama-cpp-desktop](https://github.com/Qiao-920/llama-cpp-desktop) 进行了大量功能增强和体验优化。
+> 基于 [Qiao-920/llama-cpp-desktop](https://github.com/Qiao-920/llama-cpp-desktop) 进行了功能增强和体验优化。
 
 ---
 
