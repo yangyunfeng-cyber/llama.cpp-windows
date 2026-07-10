@@ -1,0 +1,7 @@
+node_modules/
+dist/
+*.log
+desktop-state.json
+.env
+.DS_Store
+Thumbs.db

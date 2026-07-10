@@ -1,0 +1,18 @@
+appId: local.llamacpp.desktop
+productName: Llama.cpp Desktop
+directories:
+  output: dist
+files:
+  - assets/**
+  - desktop/**
+  - renderer/**
+  - package.json
+forceCodeSigning: false
+win:
+  icon: assets/llama-cpp.ico
+  target:
+    - portable
+  artifactName: Llama.cpp-Desktop.${ext}
+  signAndEditExecutable: false
+asar: true
+compression: normal
