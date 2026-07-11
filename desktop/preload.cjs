@@ -15,8 +15,9 @@ contextBridge.exposeInMainWorld('llamaDesktop', {
   openUrl: url => ipcRenderer.invoke('llama:open-url', { url }),
   mcpList: () => ipcRenderer.invoke('llama:mcp-list'),
   mcpAdd: cfg => ipcRenderer.invoke('llama:mcp-add', cfg),
-  mcpRemove: id => ipcRenderer.invoke('llama:mcp-remove', id),
-  mcpRestart: id => ipcRenderer.invoke('llama:mcp-restart', id),
+  mcpRemove: id => ipcRenderer.invoke('llama:mcp-remove', { id }),
+  mcpRestart: id => ipcRenderer.invoke('llama:mcp-restart', { id }),
+  mcpStop: id => ipcRenderer.invoke('llama:mcp-stop', { id }),
   mcpGetTools: () => ipcRenderer.invoke('llama:mcp-get-tools'),
   mcpCallTool: tc => ipcRenderer.invoke('llama:mcp-call-tool', tc),
   onEvent: callback => {

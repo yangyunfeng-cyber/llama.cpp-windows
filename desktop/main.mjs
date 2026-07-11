@@ -1,3 +1,10 @@
+process.removeAllListeners('warning')
+process.on('warning', (warning) => {
+  if (warning.name === 'DeprecationWarning' && warning.message.includes('shell option')) return
+  // eslint-disable-next-line no-console
+  console.warn(warning)
+})
+
 import { app, BrowserWindow, Menu, Tray, dialog, ipcMain, nativeImage, shell } from 'electron'
 import { spawn } from 'node:child_process'
 import { existsSync } from 'node:fs'
@@ -65,6 +72,7 @@ class McpConnection {
     addLog('mcp', `[${this.name}] starting: ${cmd} ${allArgs.join(' ')}`)
     this.process = spawn(cmd, allArgs, {
       windowsHide: true,
+      shell: true,
       stdio: ['pipe', 'pipe', 'pipe'],
     })
     const onStdout = chunk => {
@@ -243,6 +251,14 @@ async function restartMcpServer(id) {
   if (!conn) return getMcpStatePayload()
   await conn.stop()
   setTimeout(() => conn.start(), 300)
+  return getMcpStatePayload()
+}
+
+async function stopMcpServer(id) {
+  const conn = findMcpServer(id)
+  if (!conn) return getMcpStatePayload()
+  await conn.stop()
+  await saveMcpConfig()
   return getMcpStatePayload()
 }
 
@@ -963,7 +979,7 @@ function prepareChatMessages(rawMessages) {
 
   for (const message of Array.isArray(rawMessages) ? rawMessages : []) {
     if (!message || message.localOnly) continue
-    if (!['user', 'assistant', 'system'].includes(message.role)) continue
+    if (!['user', 'assistant', 'system', 'tool'].includes(message.role)) continue
 
     const text = String(message.content || '')
     const attachments = Array.isArray(message.attachments) ? message.attachments : []
@@ -1130,6 +1146,11 @@ async function buildAttachment(filePath) {
 function contentFromStreamPayload(data) {
   const choice = data?.choices?.[0]
   return choice?.delta?.content || choice?.message?.content || data?.content || ''
+}
+
+function toolCallsFromStreamPayload(data) {
+  const choice = data?.choices?.[0]
+  return choice?.delta?.tool_calls || choice?.message?.tool_calls || []
 }
 
 async function appState() {
@@ -1521,10 +1542,11 @@ function registerIpc() {
 
     addLog('chat', `request ${requestId}: ${messages.length} messages -> ${url}`)
 
+    const mcpTools = getAllMcpTools()
+    if (mcpTools.length > 0) addLog('chat', `injecting ${mcpTools.length} MCP tool(s)`)
+
     let response
     try {
-      const mcpTools = getAllMcpTools()
-      if (mcpTools.length > 0) addLog('chat', `injecting ${mcpTools.length} MCP tool(s)`)
 
       response = await fetch(url, {
         method: 'POST',
@@ -1557,6 +1579,7 @@ function registerIpc() {
     const decoder = new TextDecoder('utf-8')
     let buffer = ''
     let content = ''
+    const toolCallsById = new Map()
     let raw = null
     let streamAnnounced = false
 
@@ -1589,6 +1612,16 @@ function registerIpc() {
                 content += delta
                 sendEvent({ type: 'chat-stream', requestId, delta })
               }
+              const tcDeltas = toolCallsFromStreamPayload(data)
+              for (const tc of tcDeltas) {
+                const idx = tc.index ?? 0
+                const existing = toolCallsById.get(idx) || { id: '', type: 'function', function: { name: '', arguments: '' } }
+                if (tc.id) existing.id = tc.id
+                if (tc.type) existing.type = tc.type
+                if (tc.function?.name) existing.function.name += tc.function.name
+                if (tc.function?.arguments) existing.function.arguments += tc.function.arguments
+                toolCallsById.set(idx, existing)
+              }
             } catch {
               // Ignore malformed stream fragments; llama.cpp can occasionally split aggressively.
             }
@@ -1597,6 +1630,122 @@ function registerIpc() {
       }
     } finally {
       try { reader.releaseLock() } catch { /* already released */ }
+    }
+
+    const toolCalls = [...toolCallsById.values()]
+
+    // Tool calling loop — execute tools and feed results back to model
+    if (toolCalls.length > 0) {
+      addLog('chat', `model requested ${toolCalls.length} tool call(s)`)
+
+      // Build the assistant message with tool calls
+      const updatedMessages = [...messages, { role: 'assistant', content: content || null, tool_calls: toolCalls }]
+
+      const maxRounds = 5
+      let finalContent = content || ''
+
+      for (let round = 0; round < maxRounds && toolCalls.length > 0; round++) {
+        // Notify renderer about tool usage
+        for (const tc of toolCalls) {
+          sendEvent({ type: 'chat-stream', requestId, toolUse: { id: tc.id, name: tc.function?.name || 'unknown', status: 'calling' } })
+        }
+
+        // Execute all tool calls in parallel
+        const results = await Promise.allSettled(
+          toolCalls.map(async tc => {
+            try {
+              const result = await executeMcpTool(tc)
+              sendEvent({ type: 'chat-stream', requestId, toolUse: { id: tc.id, name: tc.function?.name || 'unknown', status: 'done' } })
+              return { tool_call_id: tc.id, role: 'tool', content: typeof result === 'string' ? result : JSON.stringify(result) }
+            } catch (err) {
+              sendEvent({ type: 'chat-stream', requestId, toolUse: { id: tc.id, name: tc.function?.name || 'unknown', status: 'error', error: err.message } })
+              return { tool_call_id: tc.id, role: 'tool', content: JSON.stringify({ error: err.message || String(err) }) }
+            }
+          })
+        )
+
+        // Build tool result messages
+        for (const r of results) {
+          if (r.value) updatedMessages.push(r.value)
+        }
+
+        addLog('chat', `tool round ${round + 1}: sending ${results.length} tool result(s) back to model`)
+
+        // Send back to model for next response
+        const nextResponse = await fetch(url, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            ...buildChatRequestBody(config, updatedMessages, true),
+            ...(mcpTools.length > 0 ? { tools: mcpTools } : {}),
+          }),
+          signal: requestTimeoutSignal(config),
+        })
+
+        if (!nextResponse.ok) {
+          const errText = await nextResponse.text().catch(() => '')
+          addLog('chat', `tool follow-up request failed: ${nextResponse.status} ${errText.slice(0, 300)}`)
+          break
+        }
+
+        // Read the follow-up stream
+        const nextReader = nextResponse.body?.getReader()
+        if (!nextReader) break
+
+        let nextBuf = ''
+        let nextContent = ''
+        toolCalls.length = 0
+        toolCallsById.clear()
+
+        try {
+          while (true) {
+            const { value, done } = await nextReader.read()
+            if (done) break
+            nextBuf += decoder.decode(value, { stream: true })
+            const nextParts = nextBuf.split(/\r?\n\r?\n/)
+            nextBuf = nextParts.pop() || ''
+
+            for (const part of nextParts) {
+              const lines = part
+                .split(/\r?\n/)
+                .map(l => l.trim())
+                .filter(l => l.startsWith('data:'))
+                .map(l => l.slice(5).trim())
+
+              for (const line of lines) {
+                if (!line || line === '[DONE]') continue
+                try {
+                  const data = JSON.parse(line)
+                  const delta = contentFromStreamPayload(data)
+                  if (delta) {
+                    nextContent += delta
+                    finalContent += delta
+                    sendEvent({ type: 'chat-stream', requestId, delta })
+                  }
+                  const tcDeltas = toolCallsFromStreamPayload(data)
+                  for (const tc of tcDeltas) {
+                    const idx = tc.index ?? 0
+                    const existing = toolCallsById.get(idx) || { id: '', type: 'function', function: { name: '', arguments: '' } }
+                    if (tc.id) existing.id = tc.id
+                    if (tc.type) existing.type = tc.type
+                    if (tc.function?.name) existing.function.name += tc.function.name
+                    if (tc.function?.arguments) existing.function.arguments += tc.function.arguments
+                    toolCallsById.set(idx, existing)
+                  }
+                } catch { /* ignore malformed fragments */ }
+              }
+            }
+          }
+        } finally {
+          try { nextReader.releaseLock() } catch { /* already released */ }
+        }
+
+        // Push assistant message for next round
+        updatedMessages.push({ role: 'assistant', content: nextContent || null, tool_calls: [...toolCallsById.values()] })
+        toolCalls.push(...toolCallsById.values())
+
+        if (nextContent) content = nextContent
+      }
     }
 
     const elapsed = Math.max(0.1, (Date.now() - startedAt) / 1000)
@@ -1690,6 +1839,11 @@ function registerIpc() {
   ipcMain.handle('llama:mcp-restart', async (_event, payload) => {
     if (!payload?.id) throw new Error('MCP server id is required')
     return restartMcpServer(payload.id)
+  })
+
+  ipcMain.handle('llama:mcp-stop', async (_event, payload) => {
+    if (!payload?.id) throw new Error('MCP server id is required')
+    return stopMcpServer(payload.id)
   })
 
   ipcMain.handle('llama:mcp-get-tools', async () => {

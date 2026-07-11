@@ -1,11 +1,9 @@
 ﻿const settingsTabs = [
   ['overview', '&#9881;', '概述', '服务入口与基础运行信息'],
   ['display', '&#128421;', '展示', '模型标签、模板与显示项'],
-  ['sampling', '&#9661;', '采样', '温度、Top-K 与 Top-P'],
-  ['penalty', '&#9651;', '惩罚', '重复、存在与最小采样'],
-  ['io', '&#128452;', '进出口', '模型、服务端与路径'],
-  ['mcp', '&#128206;', 'MCP', '预留给扩展和工具接入'],
+  ['sampling', '&#9661;', '采样与惩罚', '温度、Top-K、Top-P 与重复惩罚'],
   ['developer', '&lt;/&gt;', '开发者', '线程、GPU 与批处理'],
+  ['mcp', '&#128206;', 'MCP', '预留给扩展和工具接入'],
   ['logs', '&#128196;', '日志', '当前 llama.cpp 服务输出'],
 ]
 
@@ -35,6 +33,7 @@ const state = {
   modelInfo: null,
   modelInfoOpen: false,
   chatBusy: false,
+  userScrolledAway: false,
   dirty: false,
   busy: false,
   clearDialog: null,
@@ -164,12 +163,6 @@ function renderSettingsTabIcon(kind) {
     sampling: `
       <svg viewBox="0 0 18 18" aria-hidden="true" focusable="false">
         <path d="M4 4.3h10l-4.2 4.5v4.5l-1.6.8V8.8L4 4.3Z" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"></path>
-      </svg>
-    `,
-    penalty: `
-      <svg viewBox="0 0 18 18" aria-hidden="true" focusable="false">
-        <path d="m9 3.1 6 10.4H3L9 3.1Z" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"></path>
-        <path d="M9 6.6v3.2M9 12.2h.01" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"></path>
       </svg>
     `,
     io: `
@@ -628,6 +621,16 @@ function renderMessageContent(message, messageIndex) {
     output.push(renderCodeAwareText(answer, messageIndex, counter))
   }
 
+  if (Array.isArray(message.toolCalls) && message.toolCalls.length > 0) {
+    const chips = message.toolCalls.map(tc => {
+      const statusIcon = tc.status === 'done' ? '\u{2705}' : tc.status === 'error' ? '\u{274C}' : '\u{23F3}'
+      const label = escapeHtml(tc.name || 'unknown')
+      const errHint = tc.error ? ` title="${escapeHtml(tc.error)}"` : ''
+      return `<span class="tool-chip"${errHint}>${statusIcon} ${label}</span>`
+    }).join('')
+    output.push(`<div class="tool-calls-row">${chips}</div>`)
+  }
+
   if (showRawOutput && content) {
     output.push(`
       <details class="raw-output-block" ${message.streaming ? 'open' : ''}>
@@ -660,7 +663,8 @@ function scrollOpenRawOutputs(root = document) {
 function stickStreamingMessage(article, feed) {
   const sync = () => {
     scrollOpenRawOutputs(article)
-    if (feed && isNearBottom(feed)) feed.scrollTop = feed.scrollHeight
+    if (!feed || state.userScrolledAway) return
+    if (isNearBottom(feed)) feed.scrollTop = feed.scrollHeight
   }
   sync()
   window.requestAnimationFrame(sync)
@@ -894,7 +898,7 @@ function buildApiMessages(messages) {
       }
       continue
     }
-    if (!['user', 'assistant', 'system'].includes(message.role)) continue
+    if (!['user', 'assistant', 'system', 'tool'].includes(message.role)) continue
     if (!String(message.content || '').trim() && !(Array.isArray(message.attachments) && message.attachments.length)) continue
 
     if (message.role === 'system') {
@@ -1128,7 +1132,7 @@ function field(name, label, options = {}) {
   const value = state.config?.[name] ?? ''
   const type = options.type || 'text'
   const picker = options.pick
-    ? `<button class="icon-btn text-btn" type="button" data-pick="${name}" data-kind="${options.pick}">选择</button>`
+    ? `<button class="text-btn" type="button" data-pick="${name}" data-kind="${options.pick}">选择</button>`
     : ''
   const hint = options.hint ? `<div class="hint">${escapeHtml(options.hint)}</div>` : ''
   const input = options.textarea
@@ -1453,21 +1457,23 @@ function renderChat() {
       <div class="chat-feed" id="chatFeed">${messages}</div>
 
       <div class="composer-wrap">
-        ${renderAttachmentChips(state.attachments, true, 'composer')}
+        <div class="composer-meta">
+          ${renderAttachmentChips(state.attachments, true, 'composer')}
+          <button class="model-chip model-trigger" type="button" data-action="open-model-info" title="${escapeHtml(state.config?.model || '')}">
+            <span class="model-chip-icon">${renderModelChipIcon()}</span>
+            <span class="model-chip-label">${escapeHtml(modelName())}</span>
+          </button>
+        </div>
         <div class="composer">
           <div class="attach-wrap">
             <button class="round-btn" type="button" data-action="toggle-attachment-menu" title="添加内容">+</button>
           </div>
           <textarea data-chat-input spellcheck="false" placeholder="输入一条消息……">${escapeHtml(state.chatInput)}</textarea>
-          <button class="model-chip model-trigger" type="button" data-action="open-model-info" title="${escapeHtml(state.config?.model || '')}">
-            <span class="model-chip-icon">${renderModelChipIcon()}</span>
-            <span class="model-chip-label">${escapeHtml(modelName())}</span>
-          </button>
           <button class="send-btn" type="button" data-action="send-chat" ${state.chatBusy ? 'disabled' : ''}>
-            ${state.chatBusy ? '...' : '↑'}
+            ${state.chatBusy ? '...' : '发送'}
           </button>
         </div>
-        <div class="composer-hint">按住 Enter 发送，Shift + Enter 换行</div>
+        <div class="composer-hint">Enter 发送，Shift + Enter 换行</div>
       </div>
     </section>
   `
@@ -1617,23 +1623,24 @@ function renderModernSettingsContent() {
   }
 
   if (tab === 'sampling') {
-    return renderModernSettingsCard('采样', '控制回答的随机性和分布范围。', `
-      <div class="form-grid two">
-        ${field('temp', 'Temperature', { type: 'number' })}
-        ${field('top_k', 'Top-K', { type: 'number' })}
-        ${field('top_p', 'Top-P', { type: 'number' })}
-        ${field('min_p', 'Min-P', { type: 'number' })}
+    return `
+      <div class="settings-stack">
+        ${renderModernSettingsCard('采样', '控制回答的随机性和分布范围。', `
+          <div class="form-grid two">
+            ${field('temp', 'Temperature', { type: 'number' })}
+            ${field('top_k', 'Top-K', { type: 'number' })}
+            ${field('top_p', 'Top-P', { type: 'number' })}
+            ${field('min_p', 'Min-P', { type: 'number' })}
+          </div>
+        `)}
+        ${renderModernSettingsCard('惩罚项', '重复控制参数。', `
+          <div class="form-grid two">
+            ${field('presence_penalty', 'Presence penalty', { type: 'number' })}
+            ${field('repeat_penalty', 'Repeat penalty', { type: 'number' })}
+          </div>
+        `)}
       </div>
-    `)
-  }
-
-  if (tab === 'penalty') {
-    return renderModernSettingsCard('惩罚项', '把重复控制单独抽出来，更接近网页端设置分栏。', `
-      <div class="form-grid two">
-        ${field('presence_penalty', 'Presence penalty', { type: 'number' })}
-        ${field('repeat_penalty', 'Repeat penalty', { type: 'number' })}
-      </div>
-    `)
+    `
   }
 
   if (tab === 'io') {
@@ -1673,8 +1680,20 @@ function renderModernSettingsContent() {
         '</div></div>'
     }
     if (!mcpItems) mcpItems = '<div class="mcp-empty">还没有配置 MCP 服务器</div>'
+    var mcpFormHtml = ''
+    if (state.mcpForm) {
+      mcpFormHtml = '<div class="mcp-add-form">' +
+        '<div class="form-grid single">' +
+        '<div class="field"><span>名称</span><input type="text" data-mcp-form="name" placeholder="例如: filesystem" /></div>' +
+        '<div class="field"><span>启动命令</span><input type="text" data-mcp-form="command" placeholder="例如: npx -y @anthropic/mcp-filesystem C:\\path" /></div>' +
+        '</div>' +
+        '<div class="mcp-form-actions">' +
+        '<button type="button" class="outline-btn small-btn" data-action="mcp-cancel-form">取消</button>' +
+        '<button type="button" class="primary-btn small-btn" data-action="mcp-add">添加</button>' +
+        '</div></div>'
+    }
     var mcpHtml = '<div class="settings-stack">'
-    mcpHtml += renderModernSettingsCard('MCP 服务器', '添加 MCP 服务器', '<div class="mcp-server-list">' + mcpItems + '</div>')
+    mcpHtml += renderModernSettingsCard('MCP 服务器', '添加 MCP 服务器', '<div class="mcp-server-list">' + mcpFormHtml + mcpItems + '</div>')
     mcpHtml += renderModernSettingsCard('使用说明', 'MCP', '<div class="settings-callout"><p>启动命令例如: <code>npx -y @anthropic/mcp-filesystem C:\\path</code></p></div>')
     mcpHtml += '<button type="button" class="outline-btn" data-action="mcp-show-form">+ 添加 MCP 服务器</button></div>'
     return mcpHtml
@@ -1739,7 +1758,6 @@ function renderModernSettingsPanel() {
       <div class="settings-rail">
         <div class="settings-badge">独立设置</div>
         <h2>把模型、参数和调试页收进一个桌面端设置中心。</h2>
-        <p>这里继续沿用你的本地 llama.cpp 服务，但交互和分栏会尽量往网页端那种设置面板去靠。</p>
         <nav class="settings-rail-tabs">
           ${settingsTabs
             .map(([id, _icon, label, hint]) => `
@@ -1857,6 +1875,10 @@ function render(options = {}) {
   }
   const historyList = document.querySelector('.history-list')
   if (historyList && options.resetHistoryScroll) historyList.scrollTop = 0
+
+  if (state.view === 'chat' && !state.chatBusy) {
+    setTimeout(() => document.querySelector('[data-chat-input]')?.focus(), 0)
+  }
 }
 
 let toastTimer = null
@@ -1868,7 +1890,7 @@ function setToast(message, options) {
   toastTimer = setTimeout(() => {
     state.toast = ''
     render({ preserveChatScroll: true, ...options })
-  }, 2800)
+  }, 1000)
 }
 
 function patchFromBackend(payload) {
@@ -1895,8 +1917,19 @@ function applyStreamDelta(payload) {
     last.content = `${last.content || ''}${payload.delta}`
     updateMessageDom(lastIndex)
   }
+  if (payload.toolUse) {
+    last.toolCalls = last.toolCalls || []
+    const existing = last.toolCalls.find(tc => tc.id === payload.toolUse.id)
+    if (existing) {
+      existing.status = payload.toolUse.status
+      if (payload.toolUse.error) existing.error = payload.toolUse.error
+    } else {
+      last.toolCalls.push(payload.toolUse)
+    }
+    updateMessageDom(lastIndex)
+  }
   if (payload.done) {
-    last.content = payload.content || last.content || '模型返回了空内容。'
+    last.content = last.content || payload.content || '模型返回了空内容。'
     updateLiveStats(last)
     last.streaming = false
     state.streamRequestId = ''
@@ -1969,6 +2002,7 @@ function makeAssistantPlaceholder() {
   return {
     role: 'assistant',
     content: '',
+    toolCalls: [],
     createdAt: Date.now(),
     startedAt: Date.now(),
     model: modelName(),
@@ -2022,6 +2056,7 @@ async function sendChat() {
   state.attachments = []
   state.attachmentMenuOpen = false
   state.chatBusy = true
+  state.userScrolledAway = false
   state.view = 'chat'
   render()
 
@@ -2041,6 +2076,7 @@ async function sendChat() {
     state.chatBusy = false
     state.streamRequestId = ''
     render({ preserveChatScroll: true })
+    setTimeout(() => document.querySelector('[data-chat-input]')?.focus(), 0)
   }
 }
 
@@ -2065,6 +2101,7 @@ async function retryMessage(index) {
   state.chatMessages.push(makeAssistantPlaceholder())
   state.streamRequestId = requestId
   state.chatBusy = true
+  state.userScrolledAway = false
   render()
 
   try {
@@ -2090,6 +2127,7 @@ async function retryMessage(index) {
     state.chatBusy = false
     state.streamRequestId = ''
     render({ preserveChatScroll: true })
+    setTimeout(() => document.querySelector('[data-chat-input]')?.focus(), 0)
   }
 }
 
@@ -2335,7 +2373,7 @@ appEl.addEventListener('click', event => {
     return
   }
   if (action === 'mcp-stop' && mcpId) {
-    window.llamaDesktop.mcpRestart(mcpId).then(function(r) {
+    window.llamaDesktop.mcpStop(mcpId).then(function(r) {
       state.mcpServers = r
       render({ preserveChatScroll: true })
     }).catch(function(e) { setToast(e.message || String(e)) })
@@ -2588,6 +2626,12 @@ appEl.addEventListener('keydown', event => {
     void sendChat()
   }
 })
+
+appEl.addEventListener('scroll', event => {
+  if (event.target.id !== 'chatFeed') return
+  if (!state.chatBusy) return
+  state.userScrolledAway = !isNearBottom(event.target)
+}, { capture: true, passive: true })
 
 async function init() {
   try {

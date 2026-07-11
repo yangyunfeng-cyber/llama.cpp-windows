@@ -1,15 +1,15 @@
 :root {
-  --bg: #f5f7fb;
-  --sidebar: #eef1f7;
+  --bg: #f5f7f5;
+  --sidebar: #eef1ee;
   --surface: #ffffff;
-  --surface-soft: #f4f6fc;
+  --surface-soft: #f3f6f3;
   --ink: #181a2c;
-  --muted: #6a7296;
-  --line: #e2e5ee;
-  --line-strong: #cdd2e2;
-  --accent: #5b6af0;
-  --accent-soft: #eef0fd;
-  --accent-line: #d2d6f8;
+  --muted: #6b7a6d;
+  --line: #e0e5e1;
+  --line-strong: #cdd4ce;
+  --accent: #2d8c4a;
+  --accent-soft: #ebf6ee;
+  --accent-line: #c5e0cc;
   --danger: #e5484d;
   --danger-soft: #fef0f0;
   --pending: #d48900;
@@ -125,7 +125,7 @@ button {
 
 .gear-btn:hover,
 .sidebar-toggle:hover {
-  background: #e8eaf2;
+  background: #e5ebe7;
 }
 
 .app-shell {
@@ -206,7 +206,7 @@ button {
 .side-action:hover,
 .side-action.active,
 .history-item:hover {
-  background: #e8eaf2;
+  background: #e5ebe7;
 }
 
 .side-action.active {
@@ -272,7 +272,7 @@ button {
 }
 
 .history-item.active {
-  background: #e6e9f4;
+  background: #e4eae6;
 }
 
 .assistant-list-item {
@@ -390,7 +390,7 @@ button {
   display: grid;
   grid-template-rows: minmax(0, 1fr) auto;
   background:
-    radial-gradient(circle at 60% 36%, rgba(91, 106, 240, 0.04), transparent 28%),
+    radial-gradient(circle at 60% 36%, rgba(45, 140, 74, 0.04), transparent 28%),
     var(--surface);
 }
 
@@ -406,9 +406,9 @@ button {
   border-radius: 8px;
   background: var(--surface-soft);
   color: var(--ink);
-  padding: 5px 8px;
-  font-size: 12px;
-  min-height: 30px;
+  padding: 0 12px;
+  font-size: 13px;
+  min-height: 34px;
   cursor: pointer;
   font-family: inherit;
   -webkit-appearance: none;
@@ -495,7 +495,7 @@ button {
   border-radius: 8px;
   display: grid;
   place-items: center;
-  background: #eceef5;
+  background: #eaefeb;
   color: var(--accent);
   font-size: 12px;
   font-weight: 800;
@@ -542,6 +542,18 @@ button {
   z-index: 3;
 }
 
+.composer-meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+.composer-meta .model-chip {
+  max-width: none;
+  flex-shrink: 0;
+}
+
 .composer {
   min-height: 112px;
   border: 1px solid var(--line);
@@ -549,7 +561,7 @@ button {
   background: var(--surface);
   box-shadow: var(--shadow);
   display: grid;
-  grid-template-columns: auto minmax(0, 1fr) auto auto;
+  grid-template-columns: auto minmax(0, 1fr) auto;
   align-items: end;
   gap: 10px;
   padding: 14px;
@@ -606,12 +618,12 @@ button {
 }
 
 .attach-menu button:hover {
-  background: #eceef5;
+  background: #eaefeb;
 }
 
 .attach-menu button:disabled {
   cursor: not-allowed;
-  color: #9a9eb8;
+  color: #93a194;
   background: transparent;
 }
 
@@ -668,7 +680,7 @@ button {
   margin: 0;
   border: 1px solid var(--accent-line);
   border-radius: 8px;
-  background: #edf0f7;
+  background: #edf2ee;
   overflow: hidden;
   box-shadow: 0 8px 20px rgba(18, 22, 17, 0.05);
 }
@@ -690,7 +702,7 @@ button {
   width: 100%;
   height: 112px;
   object-fit: cover;
-  background: #e9ecf4;
+  background: #e7ede9;
 }
 
 .attachment-card figcaption {
@@ -720,7 +732,7 @@ button {
   max-width: min(360px, 100%);
   border: 1px solid var(--line);
   border-radius: 8px;
-  background: #eceef5;
+  background: #eaefeb;
   padding: 6px 8px;
   display: inline-flex;
   align-items: center;
@@ -807,30 +819,36 @@ button {
 }
 
 .round-btn,
-.send-btn,
-.icon-btn {
+.send-btn {
   border: 0;
   border-radius: 8px;
-  display: grid;
-  place-items: center;
 }
 
-.round-btn,
 .send-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.round-btn {
   width: 38px;
   height: 38px;
 }
 
-.round-btn {
-  background: #eceef5;
-  color: var(--ink);
-  font-size: 22px;
-}
-
 .send-btn {
-  background: #5b6af0;
+  background: #2d8c4a;
   color: white;
-  font-size: 19px;
+  font-size: 15px;
+  font-weight: 600;
+  border-radius: 8px;
+  border: 0;
+  width: auto;
+  min-width: 52px;
+  height: 38px;
+  padding: 0 14px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
 }
 
 .send-btn:disabled {
@@ -840,7 +858,7 @@ button {
 .model-chip {
   max-width: 180px;
   border-radius: 8px;
-  background: #eceef5;
+  background: #eaefeb;
   padding: 8px 10px;
   color: var(--ink);
   font-size: 12px;
@@ -880,7 +898,7 @@ button {
 
 .service-left code {
   color: var(--ink);
-  background: #eceef5;
+  background: #eaefeb;
   border-radius: 8px;
   padding: 5px 8px;
   overflow: hidden;
@@ -991,10 +1009,10 @@ button {
 .settings-rail {
   min-height: 0;
   border-right: 1px solid var(--line);
-  background: #f6f7fc;
+  background: #f5f7f5;
   padding: 24px 20px;
   display: grid;
-  grid-template-rows: auto auto auto minmax(0, 1fr) auto;
+  grid-template-rows: auto auto minmax(0, 1fr) auto;
   gap: 14px;
 }
 
@@ -1114,9 +1132,13 @@ button {
 .icon-btn {
   width: 38px;
   height: 38px;
-  background: #eceef5;
+  background: #eaefeb;
   color: var(--ink);
   font-size: 22px;
+  border: 0;
+  border-radius: 8px;
+  display: grid;
+  place-items: center;
 }
 
 .settings-tabs {
@@ -1228,7 +1250,7 @@ button {
 .field select:focus,
 .field textarea:focus {
   border-color: var(--accent);
-  box-shadow: 0 0 0 3px rgba(91, 106, 240, 0.12);
+  box-shadow: 0 0 0 3px rgba(45, 140, 74, 0.12);
 }
 
 .hint {
@@ -1342,8 +1364,8 @@ button {
   max-height: calc(100vh - 260px);
   overflow-y: auto;
   border-radius: 8px;
-  background: #131525;
-  color: #c9cde0;
+  background: #151a16;
+  color: #cad7cb;
   padding: 14px;
   font-family: "Cascadia Mono", Consolas, monospace;
   font-size: 12px;
@@ -1359,7 +1381,7 @@ button {
 }
 
 .log-entry span {
-  color: #8a95c0;
+  color: #77997e;
 }
 
 .log-entry strong {
@@ -1373,7 +1395,7 @@ button {
 }
 
 .empty-log {
-  color: #888ba3;
+  color: #7f9282;
 }
 
 .toast,
@@ -1387,8 +1409,10 @@ button {
 }
 
 .toast {
-  right: 24px;
-  bottom: 24px;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  z-index: 100;
   max-width: 520px;
   display: none;
   padding: 12px 14px;
@@ -1563,7 +1587,7 @@ button {
 }
 
 .markdown-text a:hover {
-  color: #4752cc;
+  color: #257a3d;
 }
 
 .markdown-text strong {
@@ -1583,7 +1607,7 @@ button {
 .markdown-text .inline-code {
   font-family: "Cascadia Mono", Consolas, monospace;
   font-size: 0.88em;
-  background: #edf0f7;
+  background: #edf2ee;
   border: 1px solid var(--line);
   border-radius: 4px;
   padding: 1px 5px;
@@ -1600,7 +1624,7 @@ button {
 }
 
 .markdown-text thead {
-  background: #f2f4f9;
+  background: #f1f5f2;
 }
 
 .markdown-text th,
@@ -1626,6 +1650,25 @@ button {
   min-height: 32px;
 }
 
+.tool-calls-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 10px 0 6px;
+}
+
+.tool-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 10px;
+  border-radius: 12px;
+  font-size: 12px;
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  color: var(--text);
+}
+
 .think-block {
   border-left: 3px solid var(--line-strong);
   margin: 0 0 14px;
@@ -1636,7 +1679,7 @@ button {
 .think-block summary {
   width: fit-content;
   border-radius: 8px;
-  background: #edf0f7;
+  background: #edf2ee;
   color: var(--muted);
   cursor: pointer;
   font-size: 12px;
@@ -1648,7 +1691,7 @@ button {
   margin: 14px 0 0;
   border: 1px dashed var(--line-strong);
   border-radius: 8px;
-  background: #f1f3fa;
+  background: #eff5f1;
   overflow: hidden;
   display: block;
 }
@@ -1692,7 +1735,7 @@ button {
   gap: 12px;
   padding: 0 11px;
   border-bottom: 1px solid var(--line);
-  background: #f2f4f9;
+  background: #f1f5f2;
 }
 
 .code-block figcaption span {
@@ -1717,7 +1760,7 @@ button {
 }
 
 .code-block button:hover {
-  background: #e2e4f0;
+  background: #dde5df;
 }
 
 .code-block .eye-btn {
@@ -1806,7 +1849,7 @@ button {
 
 .message-meta span {
   border-radius: 8px;
-  background: #eceef5;
+  background: #eaefeb;
   color: var(--muted);
   padding: 3px 7px;
   font-size: 11px;
@@ -1830,7 +1873,7 @@ button {
 }
 
 .message-actions button:hover {
-  background: #eceef5;
+  background: #eaefeb;
   color: var(--ink);
 }
 
@@ -1885,18 +1928,17 @@ body:has(.app-shell.sidebar-collapsed) .drag-region {
   bottom: 14px;
 }
 
-.model-chip {
-  position: absolute;
-  right: 66px;
-  bottom: 14px;
-  max-width: min(280px, calc(100% - 132px));
-  align-self: center;
-}
-
 .send-btn {
   position: absolute;
   right: 16px;
   bottom: 14px;
+  width: auto;
+  min-width: 52px;
+  height: 38px;
+  padding: 0 14px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
 }
 
 @media (max-width: 1460px) {
@@ -1927,10 +1969,6 @@ body:has(.app-shell.sidebar-collapsed) .drag-region {
     min-height: 122px;
     padding-right: 122px;
   }
-
-  .model-chip {
-    max-width: min(220px, calc(100% - 122px));
-  }
 }
 
 
@@ -1941,14 +1979,6 @@ body:has(.app-shell.sidebar-collapsed) .drag-region {
 
   .composer textarea {
     min-height: 64px;
-  }
-
-  .model-chip {
-    left: 58px;
-    right: 58px;
-    bottom: 14px;
-    max-width: none;
-    text-align: center;
   }
 
   .service-actions {
@@ -1986,12 +2016,16 @@ body:has(.app-shell.sidebar-collapsed) .drag-region {
 
 .attach-menu button span.menu-icon.video {
   border-radius: 999px;
-  background: #f2eef5;
+  background: #efeeee;
 }
 
 .send-btn {
-  font-size: 21px;
-  font-weight: 800;
+  font-size: 15px;
+  font-weight: 600;
+  width: auto;
+  min-width: 52px;
+  height: 38px;
+  padding: 0 14px;
 }
 
 .settings-panel {
@@ -2007,12 +2041,9 @@ body:has(.app-shell.sidebar-collapsed) .drag-region {
   width: 88px;
   min-width: 88px;
   padding: 0;
-  width: min(1050px, 94%);
-  margin: 0 auto 14px;
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 16px;
+  justify-content: center;
 }
 
 .terminal-head span,
@@ -2036,8 +2067,8 @@ body:has(.app-shell.sidebar-collapsed) .drag-region {
   margin: 0 auto;
   overflow: auto;
   border-radius: 8px;
-  background: #131525;
-  color: #c9cde0;
+  background: #151a16;
+  color: #cad7cb;
   padding: 16px;
   font-family: "Cascadia Mono", Consolas, monospace;
   font-size: 12px;
@@ -2055,7 +2086,7 @@ body:has(.app-shell.sidebar-collapsed) .drag-region {
 }
 
 .terminal-summary strong {
-  color: #5b6af0;
+  color: #2d8c4a;
   font-weight: 700;
 }
 
@@ -2068,16 +2099,16 @@ body:has(.app-shell.sidebar-collapsed) .drag-region {
 }
 
 .terminal-row span {
-  color: #8289b8;
+  color: #6b8f72;
 }
 
 .terminal-row strong {
-  color: #c4c8e0;
+  color: #c8d9c7;
 }
 
 .terminal-row em {
   min-width: 0;
-  color: #c9cde0;
+  color: #cad7cb;
   font-style: normal;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -2140,7 +2171,7 @@ body:has(.app-shell.sidebar-collapsed) .drag-region {
   display: grid;
   place-items: center;
   padding: 20px;
-  background: #f1f3fa;
+  background: #eff5f1;
 }
 
 .preview-image-wrap img {
@@ -2167,7 +2198,7 @@ body:has(.app-shell.sidebar-collapsed) .drag-region {
 
 .history-row:hover,
 .history-row.active {
-  background: #e8eaf2;
+  background: #e5ebe7;
 }
 
 .history-row .history-item {
@@ -2207,7 +2238,7 @@ body:has(.app-shell.sidebar-collapsed) .drag-region {
 }
 
 .history-icon-btn:hover {
-  background: #d5d8e8;
+  background: #cdd8d0;
 }
 
 .history-icon-btn.danger:hover {
@@ -2294,7 +2325,7 @@ body:has(.app-shell.sidebar-collapsed) .drag-region {
 .log-entry {
   min-height: 34px;
   align-items: center;
-  border-bottom: 1px solid #dce0ed;
+  border-bottom: 1px solid #cdd9cf;
   padding: 5px 0;
 }
 
@@ -2305,21 +2336,21 @@ body:has(.app-shell.sidebar-collapsed) .drag-region {
 
 .terminal-row span,
 .log-entry span {
-  color: #7279a8;
+  color: #6b8f72;
 }
 
 .terminal-row strong,
 .log-entry strong {
-  color: #5b6af0;
+  color: #2d8c4a;
   font-weight: 700;
 }
 
 .terminal-row em {
-  color: #1f2035;
+  color: #1a201c;
 }
 
 .log-entry em {
-  color: #1f2035;
+  color: #1a201c;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -2344,7 +2375,7 @@ body:has(.app-shell.sidebar-collapsed) .drag-region {
   min-height: 0;
   border: 1px solid var(--ink);
   border-radius: 8px;
-  background: #0e0f17;
+  background: #0e110f;
   color: #c0c0c0;
   box-shadow: 0 18px 44px rgba(0, 0, 0, 0.14);
   padding: 14px 16px;
@@ -2367,7 +2398,7 @@ body:has(.app-shell.sidebar-collapsed) .drag-region {
 }
 
 .terminal-muted {
-  color: #888898;
+  color: #809080;
 }
 
 .empty-log {
@@ -2424,7 +2455,7 @@ body:has(.app-shell.sidebar-collapsed) .drag-region {
 
 .history-dialog input:focus {
   border-color: var(--accent-line);
-  box-shadow: 0 0 0 3px rgba(91, 106, 240, 0.10);
+  box-shadow: 0 0 0 3px rgba(45, 140, 74, 0.10);
 }
 
 .dialog-actions {
@@ -2448,7 +2479,7 @@ body:has(.app-shell.sidebar-collapsed) .drag-region {
 }
 
 .model-trigger {
-  border: 1px solid #cfd2e5;
+  border: 1px solid #c8d9cc;
   display: inline-flex;
   align-items: center;
   gap: 8px;
@@ -2457,8 +2488,8 @@ body:has(.app-shell.sidebar-collapsed) .drag-region {
 }
 
 .model-trigger:hover {
-  background: #e6e9f6;
-  border-color: #c2c7e0;
+  background: #e2efe6;
+  border-color: #b5d4bd;
   color: var(--ink);
   transform: translateY(-1px);
 }
@@ -2531,7 +2562,7 @@ body:has(.app-shell.sidebar-collapsed) .drag-region {
   min-height: 0;
   overflow: auto;
   padding: 14px 16px 16px;
-  background: #f3f4fa;
+  background: #f4f7f5;
   display: grid;
   gap: 12px;
   align-content: start;
@@ -2571,7 +2602,7 @@ body:has(.app-shell.sidebar-collapsed) .drag-region {
   align-items: center;
   min-height: 36px;
   padding: 7px 10px;
-  border-bottom: 1px solid #e3e6f2;
+  border-bottom: 1px solid #d6e0d7;
 }
 
 .model-info-row:last-child {
@@ -2598,7 +2629,7 @@ body:has(.app-shell.sidebar-collapsed) .drag-region {
   height: 28px;
   border: 1px solid var(--line);
   border-radius: 8px;
-  background: #f1f3fa;
+  background: #eff5f1;
   color: var(--ink);
   font-size: 14px;
   display: grid;
@@ -2606,7 +2637,7 @@ body:has(.app-shell.sidebar-collapsed) .drag-region {
 }
 
 .icon-copy-btn:hover {
-  background: #e8eaf3;
+  background: #cedbd1;
 }
 
 .icon-copy-btn svg {
@@ -2652,7 +2683,7 @@ body:has(.app-shell.sidebar-collapsed) .drag-region {
   padding: 12px;
   max-height: 220px;
   overflow: auto;
-  background: #f1f3fa;
+  background: #eff5f1;
   color: #2f342e;
   font-size: 12px;
   line-height: 1.55;
@@ -2663,7 +2694,7 @@ body:has(.app-shell.sidebar-collapsed) .drag-region {
 
 .model-info-empty {
   min-height: 280px;
-  border: 1px dashed #ccd0e2;
+  border: 1px dashed #c4d0c6;
   border-radius: 14px;
   background: var(--surface);
   display: grid;
@@ -2703,7 +2734,7 @@ body:has(.app-shell.sidebar-collapsed) .drag-region {
 
 .settings-rail {
   padding: 22px 18px 18px;
-  background: #f6f7fc;
+  background: #f5f7f5;
   gap: 16px;
 }
 
@@ -2736,22 +2767,22 @@ body:has(.app-shell.sidebar-collapsed) .drag-region {
 .settings-tab-icon {
   width: 40px;
   height: 40px;
-  border: 1px solid #d4d8e9;
+  border: 1px solid #c0d4c5;
   border-radius: 12px;
-  background: linear-gradient(180deg, var(--surface) 0%, #f4f6fc 100%);
+  background: linear-gradient(180deg, var(--surface) 0%, #f3f6f4 100%);
   display: grid;
   place-items: center;
-  color: #5d65a0;
+  color: #4a7c5b;
   font-size: 15px;
   line-height: 0;
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.95);
 }
 
 .settings-rail-tabs button.active .settings-tab-icon {
-  border-color: #c8cdf0;
-  background: linear-gradient(180deg, #f7f8fd 0%, #eef0fc 100%);
+  border-color: #a8ccb2;
+  background: linear-gradient(180deg, #f6faf7 0%, #eaf2ec 100%);
   color: var(--accent);
-  box-shadow: 0 10px 20px rgba(91, 106, 240, 0.08);
+  box-shadow: 0 10px 20px rgba(45, 140, 74, 0.08);
 }
 
 .settings-tab-icon svg {
@@ -2822,10 +2853,10 @@ body:has(.app-shell.sidebar-collapsed) .drag-region {
 
 .settings-callout {
   margin-top: 14px;
-  border: 1px solid #d3d7eb;
+  border: 1px solid #c2d4c5;
   border-radius: 8px;
-  background: #f1f3fc;
-  color: #464d7a;
+  background: #f0f7f2;
+  color: #3d5c45;
   padding: 10px 12px;
   font-size: 12px;
   line-height: 1.65;
@@ -2849,8 +2880,8 @@ body:has(.app-shell.sidebar-collapsed) .drag-region {
   overflow: auto;
   border: 1px solid var(--line);
   border-radius: 8px;
-  background: #131525;
-  color: #c9cde0;
+  background: #151a16;
+  color: #cad7cb;
   padding: 11px 12px;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
@@ -2859,7 +2890,7 @@ body:has(.app-shell.sidebar-collapsed) .drag-region {
 }
 
 .command-preview.has-error pre {
-  background: #1c1320;
+  background: #1a1c17;
   color: #ffd8d2;
   border-color: #e8b8b7;
 }
@@ -2957,9 +2988,9 @@ body:has(.app-shell.sidebar-collapsed) .drag-region {
 }
 
 .settings-mcp-placeholder {
-  border: 1px dashed #cfd3e4;
+  border: 1px dashed #c7d4c9;
   border-radius: 14px;
-  background: #f4f5fc;
+  background: #f1f4f1;
   padding: 18px;
 }
 
