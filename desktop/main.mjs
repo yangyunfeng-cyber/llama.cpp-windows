@@ -5,7 +5,7 @@ process.on('warning', (warning) => {
   console.warn(warning)
 })
 
-import { app, BrowserWindow, Menu, Tray, dialog, ipcMain, nativeImage, shell } from 'electron'
+import { app, BrowserWindow, clipboard, Menu, Tray, dialog, ipcMain, nativeImage, shell } from 'electron'
 import { spawn } from 'node:child_process'
 import { existsSync } from 'node:fs'
 import { mkdir, readFile, stat, writeFile } from 'node:fs/promises'
@@ -1734,16 +1734,33 @@ function registerIpc() {
     }
   })
 
-  ipcMain.handle('llama:build-image-attachment', async (_event, uint8Array, mimeType) => {
+  ipcMain.handle('llama:read-clipboard-attachments', async (_event) => {
     try {
-      const buffer = Buffer.from(uint8Array)
-      const ext = String(mimeType || 'image/png').split('/')[1] || 'png'
-      const tmpPath = path.join(app.getPath('temp'), `paste-${Date.now()}.${ext}`)
-      await writeFile(tmpPath, buffer)
-      return await buildAttachment(tmpPath)
+      const attachments = []
+
+      // Check for files in clipboard
+      const formats = clipboard.availableFormats()
+      const hasFiles = formats.some(f => f === 'text/uri-list' || f.startsWith('FileNameW'))
+
+      if (hasFiles) {
+        // Electron clipboard can't read file paths directly in sandbox-safe way,
+        // so we read any available image as nativeImage instead
+      }
+
+      // Read clipboard image (for screenshots etc.)
+      const image = clipboard.readImage()
+      if (!image.isEmpty()) {
+        const pngBuffer = image.toPNG()
+        const tmpPath = path.join(app.getPath('temp'), `paste-${Date.now()}.png`)
+        await writeFile(tmpPath, pngBuffer)
+        const att = await buildAttachment(tmpPath)
+        if (att) attachments.push(att)
+      }
+
+      return attachments
     } catch (err) {
-      addLog('error', `paste image attachment failed: ${err instanceof Error ? err.message : String(err)}`)
-      return null
+      addLog('error', `clipboard read failed: ${err instanceof Error ? err.message : String(err)}`)
+      return []
     }
   })
 

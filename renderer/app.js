@@ -2445,51 +2445,36 @@ appEl.addEventListener('paste', async event => {
   const clipboardData = event.clipboardData
   if (!clipboardData) return
 
-  const items = clipboardData.items
+  // Check if clipboard has files (from Explorer copy)
   const files = clipboardData.files
-  if (!items || (!files.length && items.length === 0)) return
+  if (files && files.length > 0) {
+    event.preventDefault()
+    for (const file of files) {
+      try {
+        const attachment = await window.llamaDesktop.buildPastedAttachment(file.path)
+        if (attachment) state.attachments = [...state.attachments, attachment]
+      } catch { /* skip failed paste */ }
+    }
+    render()
+    return
+  }
 
-  // Check if there are files or images in the clipboard
-  let hasFilesOrImages = files.length > 0
-  let imageItems = []
-  for (const item of items) {
-    if (item.type.startsWith('image/')) {
-      imageItems.push(item)
-      hasFilesOrImages = true
+  // Check if clipboard has image data (from screenshot tools)
+  const items = clipboardData.items
+  if (items) {
+    for (const item of items) {
+      if (item.type.startsWith('image/')) {
+        event.preventDefault()
+        // Use Electron's main-process clipboard to read the image
+        const attachments = await window.llamaDesktop.readClipboardAttachments()
+        if (attachments && attachments.length) {
+          state.attachments = [...state.attachments, ...attachments]
+          render()
+        }
+        return
+      }
     }
   }
-
-  if (!hasFilesOrImages) return // plain text paste, let browser handle it
-
-  event.preventDefault()
-
-  // Handle files (from Explorer copy)
-  for (const file of files) {
-    try {
-      const attachment = await window.llamaDesktop.buildPastedAttachment(file.path)
-      if (attachment) {
-        state.attachments = [...state.attachments, attachment]
-      }
-    } catch { /* skip failed paste */ }
-  }
-
-  // Handle image data (from screenshot tools — no file path)
-  for (const item of imageItems) {
-    try {
-      const blob = item.getAsFile()
-      if (!blob) continue
-      const buffer = await blob.arrayBuffer()
-      const attachment = await window.llamaDesktop.buildImageAttachment(
-        Array.from(new Uint8Array(buffer)),
-        blob.type
-      )
-      if (attachment) {
-        state.attachments = [...state.attachments, attachment]
-      }
-    } catch { /* skip failed paste */ }
-  }
-
-  if (state.attachments.length) render()
 })
 
 async function init() {

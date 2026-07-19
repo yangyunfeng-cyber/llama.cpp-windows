@@ -12,7 +12,7 @@ contextBridge.exposeInMainWorld('llamaDesktop', {
   pickFile: options => ipcRenderer.invoke('llama:pick-file', options?.properties ? options : { filters: options }),
   pickAttachments: payload => ipcRenderer.invoke('llama:pick-attachments', payload),
   buildPastedAttachment: filePath => ipcRenderer.invoke('llama:build-pasted-attachment', filePath),
-  buildImageAttachment: (buffer, mimeType) => ipcRenderer.invoke('llama:build-image-attachment', buffer, mimeType),
+  readClipboardAttachments: () => ipcRenderer.invoke('llama:read-clipboard-attachments'),
   saveFile: payload => ipcRenderer.invoke('llama:save-file', payload),
   revealPath: filePath => ipcRenderer.invoke('llama:reveal-path', { filePath }),
   openUrl: url => ipcRenderer.invoke('llama:open-url', { url }),
