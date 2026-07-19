@@ -10,6 +10,7 @@ import { spawn } from 'node:child_process'
 import { existsSync } from 'node:fs'
 import { mkdir, readFile, stat, writeFile } from 'node:fs/promises'
 import path from 'node:path'
+import { buildToml, optionalNumberLine, parseToml, parseTomlValue, stripTomlComment, tomlString } from './toml.mjs'
 import { fileURLToPath } from 'node:url'
 
 const __filename = fileURLToPath(import.meta.url)
@@ -41,6 +42,7 @@ let logs = []
 // ── MCP Server State and Client (inserted after let logs = []) ──
 let mcpServers = []
 let mcpRequestId = 0
+let lastStreamParseWarning = 0
 
 function nextMcpRequestId() {
   return `mcp-${Date.now()}-${++mcpRequestId}`
@@ -60,10 +62,33 @@ class McpConnection {
     this.pending = new Map()
     this._timeouts = new Map()
     this.tools = []
+    this._intentionalStop = false
+    this._reconnectAttempts = 0
+    this._maxReconnectAttempts = 5
+    this._reconnectTimer = null
+  }
+
+  _scheduleReconnect() {
+    if (this._reconnectTimer) return
+    if (this._reconnectAttempts >= this._maxReconnectAttempts) {
+      addLog('mcp', `[${this.name}] max reconnect attempts (${this._maxReconnectAttempts}) reached, giving up`)
+      return
+    }
+    const delay = Math.min(
+      1000 * Math.pow(2, this._reconnectAttempts) + Math.random() * 1000,
+      30000
+    )
+    this._reconnectAttempts++
+    addLog('mcp', `[${this.name}] auto-reconnect attempt ${this._reconnectAttempts}/${this._maxReconnectAttempts} in ${Math.round(delay / 1000)}s`)
+    this._reconnectTimer = setTimeout(() => {
+      this._reconnectTimer = null
+      this.start()
+    }, delay)
   }
 
   async start() {
     if (this.process) return
+    this._intentionalStop = false
     this.status = 'connecting'
     this.error = ''
     const parts = String(this.command).split(/\s+/).filter(Boolean)
@@ -123,7 +148,10 @@ class McpConnection {
         this._timeouts.delete(rid)
       }
       this.pending.clear()
-      if (wasConnected) sendEvent({ type: 'mcp-status', id: this.id, status: this.status })
+      if (wasConnected) {
+        sendEvent({ type: 'mcp-status', id: this.id, status: this.status })
+        if (!this._intentionalStop) this._scheduleReconnect()
+      }
     })
     try {
       const result = await this._send('initialize', {
@@ -131,6 +159,7 @@ class McpConnection {
         capabilities: {},
         clientInfo: { name: 'llama-cpp-desktop', version: '0.6.13' },
       })
+      this._reconnectAttempts = 0
       this.status = 'connected'
       addLog('mcp', `[${this.name}] connected: ${result?.serverInfo?.name || 'ok'}`)
       this.process?.stdin?.write(JSON.stringify({
@@ -149,6 +178,11 @@ class McpConnection {
   }
 
   async stop() {
+    this._intentionalStop = true
+    if (this._reconnectTimer) {
+      clearTimeout(this._reconnectTimer)
+      this._reconnectTimer = null
+    }
     if (this.process) {
       this.process.kill()
       this.process = null
@@ -294,7 +328,7 @@ async function executeMcpTool(toolCall) {
   throw new Error(`Tool ${toolName} not found on any connected MCP server`)
 }
 
-function noopMcpState() {
+function getMcpDisplayState() {
   return mcpServers.map(s => ({
     id: s.id, name: s.name, status: s.status, error: s.error, toolCount: s.tools?.length || 0,
   }))
@@ -488,78 +522,10 @@ function addLog(source, chunk) {
       setStatus({ message: entry.line })
     }
   }
-  sendEvent({ type: 'logs', logs })
+  sendEvent({ type: 'logs-delta', entries })
 }
 
-function stripTomlComment(line) {
-  let inString = false
-  let escaped = false
-  for (let index = 0; index < line.length; index += 1) {
-    const char = line[index]
-    if (escaped) {
-      escaped = false
-      continue
-    }
-    if (char === '\\') {
-      escaped = true
-      continue
-    }
-    if (char === '"') {
-      inString = !inString
-      continue
-    }
-    if (char === '#' && !inString) {
-      return line.slice(0, index)
-    }
-  }
-  return line
-}
-
-function parseTomlValue(value) {
-  const text = value.trim()
-  if (!text) {
-    return ''
-  }
-  if (text.startsWith('"') && text.endsWith('"')) {
-    try {
-      return JSON.parse(text)
-    } catch {
-      return text.slice(1, -1).replace(/\\"/g, '"').replace(/\\\\/g, '\\')
-    }
-  }
-  if (text === 'true') {
-    return true
-  }
-  if (text === 'false') {
-    return false
-  }
-  if (/^[+-]?\d+$/.test(text)) {
-    return Number.parseInt(text, 10)
-  }
-  if (/^[+-]?\d+\.\d+$/.test(text)) {
-    return Number.parseFloat(text)
-  }
-  return text
-}
-
-function parseToml(raw) {
-  const result = {}
-  for (const originalLine of raw.split(/\r?\n/)) {
-    const line = stripTomlComment(originalLine).trim()
-    if (!line || line.startsWith('[')) {
-      if (line.startsWith('[')) console.warn('[TOML] Skipping section header (not supported):', line)
-      continue
-    }
-    const equalIndex = line.indexOf('=')
-    if (equalIndex < 0) {
-      continue
-    }
-    const key = line.slice(0, equalIndex).trim()
-    const value = line.slice(equalIndex + 1)
-    result[key] = parseTomlValue(value)
-  }
-  return result
-}
+// TOML functions imported from ./toml.mjs
 
 function toNumber(value, fallback = '') {
   if (value === '' || value === null || value === undefined) {
@@ -609,122 +575,7 @@ function normalizeConfig(values, state = {}) {
   }
 }
 
-function tomlString(value) {
-  return `"${String(value || '').replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`
-}
-
-function optionalNumberLine(key, value) {
-  if (value === '' || value === null || value === undefined) {
-    return null
-  }
-  return `${key} = ${value}`
-}
-
-function buildToml(config) {
-  const lines = [
-    '# config.toml',
-    '# Generated by Llama.cpp Desktop.',
-    '',
-    '# desktop launch mode: direct or launcher',
-    `launch_mode = ${tomlString(config.launch_mode || 'direct')}`,
-    '',
-    '# llama-server.exe 的绝对路径',
-    `llama_server_path = ${tomlString(config.llama_server_path)}`,
-    '',
-    '# 模型路径',
-    `model = ${tomlString(config.model)}`,
-  ]
-
-  if (config.mmproj) {
-    lines.push('', '# 多模态投影文件', `mmproj = ${tomlString(config.mmproj)}`)
-  } else {
-    lines.push('', '# mmproj = "G:\\\\llama.cpp\\\\models\\\\your-model\\\\mmproj.gguf"')
-  }
-
-  lines.push(
-    '',
-    '# 服务器设置',
-    `host = ${tomlString(config.host)}`,
-    `port = ${config.port}`,
-    '',
-    '# 常用参数',
-    `ctx_size = ${config.ctx_size}`,
-    `n_predict = ${config.n_predict}`,
-    `n_gpu_layers = ${config.n_gpu_layers}`,
-    `request_timeout_ms = ${config.request_timeout_ms}`,
-    '',
-    '# 对话模板参数',
-    `chat_template_kwargs = ${tomlString(config.chat_template_kwargs)}`,
-    '',
-    '# 采样设置',
-    `temp = ${config.temp}`,
-    `top_k = ${config.top_k}`,
-    `top_p = ${config.top_p}`,
-    `min_p = ${config.min_p}`,
-    `presence_penalty = ${config.presence_penalty}`,
-  )
-
-  const repeatPenalty = optionalNumberLine('repeat_penalty', config.repeat_penalty)
-  if (repeatPenalty) {
-    lines.push(repeatPenalty)
-  }
-
-  lines.push('', '# 系统设置')
-  for (const [key, value] of [
-    ['threads', config.threads],
-    ['threads_batch', config.threads_batch],
-    ['batch_size', config.batch_size],
-    ['ubatch_size', config.ubatch_size],
-  ]) {
-    const line = optionalNumberLine(key, value)
-    lines.push(line || `# ${key} = `)
-  }
-
-  lines.push('', '# 混合专家模型设置')
-  if (config.cpu_moe) {
-    lines.push('cpu_moe = true')
-  } else {
-    lines.push('# cpu_moe = true')
-  }
-  const nCpuMoe = optionalNumberLine('n_cpu_moe', config.n_cpu_moe)
-  lines.push(nCpuMoe || '# n_cpu_moe = 15')
-
-  lines.push('', '# GPU 设置')
-  if (config.device) {
-    lines.push(`device = ${tomlString(config.device)}`)
-  } else {
-    lines.push('# device = ""')
-  }
-  if (config.split_mode) {
-    lines.push(`split_mode = ${tomlString(config.split_mode)}`)
-  }
-  if (config.tensor_split) {
-    lines.push(`tensor_split = ${tomlString(config.tensor_split)}`)
-  } else {
-    lines.push('# tensor_split = "3,1"')
-  }
-  const mainGpu = optionalNumberLine('main_gpu', config.main_gpu)
-  lines.push(mainGpu || '# main_gpu = 0')
-
-  lines.push(
-    '',
-    '# 日志与功能',
-    `verbose = ${config.verbose ? 'true' : 'false'}`,
-    `log_verbosity = ${config.log_verbosity}`,
-    `webui = ${config.webui ? 'true' : 'false'}`,
-    `embeddings = ${config.embeddings ? 'true' : 'false'}`,
-    `continuous_batching = ${config.continuous_batching ? 'true' : 'false'}`,
-    '',
-    '# 额外 llama-server 参数，会追加到最终启动命令末尾',
-    `extra_args = ${tomlString(config.extra_args)}`,
-    `show_thinking = ${config.show_thinking ? 'true' : 'false'}`,
-    `expand_thinking = ${config.expand_thinking ? 'true' : 'false'}`,
-    `show_raw_output = ${config.show_raw_output ? 'true' : 'false'}`,
-    '',
-  )
-
-  return lines.join('\n')
-}
+// tomlString, optionalNumberLine, buildToml imported from ./toml.mjs
 
 async function readJson(filePath, fallback) {
   try {
@@ -1083,6 +934,34 @@ function mimeForFile(filePath) {
     '.tsx': 'text/typescript',
     '.html': 'text/html',
     '.css': 'text/css',
+    '.bat': 'text/plain',
+    '.cmd': 'text/plain',
+    '.sh': 'text/x-shellscript',
+    '.ps1': 'text/plain',
+    '.xml': 'text/xml',
+    '.ini': 'text/plain',
+    '.cfg': 'text/plain',
+    '.conf': 'text/plain',
+    '.env': 'text/plain',
+    '.gitignore': 'text/plain',
+    '.dockerfile': 'text/plain',
+    '.Makefile': 'text/plain',
+    '.rs': 'text/x-rust',
+    '.go': 'text/x-go',
+    '.java': 'text/x-java',
+    '.rb': 'text/x-ruby',
+    '.php': 'text/x-php',
+    '.sql': 'text/x-sql',
+    '.swift': 'text/x-swift',
+    '.kt': 'text/x-kotlin',
+    '.scala': 'text/x-scala',
+    '.lua': 'text/x-lua',
+    '.r': 'text/x-r',
+    '.pl': 'text/x-perl',
+    '.dart': 'text/x-dart',
+    '.vue': 'text/html',
+    '.svelte': 'text/html',
+    '.astro': 'text/html',
   }[ext] || 'application/octet-stream'
 }
 
@@ -1106,6 +985,34 @@ function isTextLike(filePath) {
     '.cpp',
     '.h',
     '.hpp',
+    '.bat',
+    '.cmd',
+    '.sh',
+    '.ps1',
+    '.xml',
+    '.ini',
+    '.cfg',
+    '.conf',
+    '.env',
+    '.gitignore',
+    '.dockerfile',
+    '.Makefile',
+    '.rs',
+    '.go',
+    '.java',
+    '.rb',
+    '.php',
+    '.sql',
+    '.swift',
+    '.kt',
+    '.scala',
+    '.lua',
+    '.r',
+    '.pl',
+    '.dart',
+    '.vue',
+    '.svelte',
+    '.astro',
   ].includes(path.extname(filePath).toLowerCase())
 }
 
@@ -1122,21 +1029,21 @@ function isPdfLike(filePath) {
 }
 
 async function buildAttachment(filePath) {
-  const stat = await import('node:fs/promises').then(fs => fs.stat(filePath))
+  const fileStat = await stat(filePath)
   const attachment = {
     path: filePath,
     name: path.basename(filePath),
-    size: stat.size,
+    size: fileStat.size,
     mime: mimeForFile(filePath),
     kind: isImageLike(filePath) ? 'image' : isAudioLike(filePath) ? 'audio' : isPdfLike(filePath) ? 'pdf' : isTextLike(filePath) ? 'text' : 'file',
   }
 
-  if (attachment.kind === 'image' && stat.size <= 10 * 1024 * 1024) {
+  if (attachment.kind === 'image' && fileStat.size <= 10 * 1024 * 1024) {
     const raw = await readFile(filePath)
     attachment.dataUrl = `data:${attachment.mime};base64,${raw.toString('base64')}`
   }
 
-  if (attachment.kind === 'text' && stat.size <= 256 * 1024) {
+  if (attachment.kind === 'text' && fileStat.size <= 256 * 1024) {
     attachment.text = await readFile(filePath, 'utf8')
   }
 
@@ -1153,6 +1060,70 @@ function toolCallsFromStreamPayload(data) {
   return choice?.delta?.tool_calls || choice?.message?.tool_calls || []
 }
 
+async function parseStreamEvents(reader, requestId) {
+  const decoder = new TextDecoder('utf-8')
+  let buffer = ''
+  let content = ''
+  const toolCallsById = new Map()
+  let raw = null
+  let streamAnnounced = false
+
+  try {
+    while (true) {
+      const { value, done } = await reader.read()
+      if (done) break
+      buffer += decoder.decode(value, { stream: true })
+      const parts = buffer.split(/\r?\n\r?\n/)
+      buffer = parts.pop() || ''
+
+      for (const part of parts) {
+        const lines = part
+          .split(/\r?\n/)
+          .map(line => line.trim())
+          .filter(line => line.startsWith('data:'))
+          .map(line => line.slice(5).trim())
+
+        for (const line of lines) {
+          if (!line || line === '[DONE]') continue
+          try {
+            const data = JSON.parse(line)
+            raw = data
+            const delta = contentFromStreamPayload(data)
+            if (delta) {
+              if (!streamAnnounced) {
+                addLog('chat', `streaming response for ${requestId}`)
+                streamAnnounced = true
+              }
+              content += delta
+              sendEvent({ type: 'chat-stream', requestId, delta })
+            }
+            const tcDeltas = toolCallsFromStreamPayload(data)
+            for (const tc of tcDeltas) {
+              const idx = tc.index ?? 0
+              const existing = toolCallsById.get(idx) || { id: '', type: 'function', function: { name: '', arguments: '' } }
+              if (tc.id) existing.id = tc.id
+              if (tc.type) existing.type = tc.type
+              if (tc.function?.name) existing.function.name += tc.function.name
+              if (tc.function?.arguments) existing.function.arguments += tc.function.arguments
+              toolCallsById.set(idx, existing)
+            }
+          } catch (parseError) {
+            const now = Date.now()
+            if (now - lastStreamParseWarning > 5000) {
+              lastStreamParseWarning = now
+              addLog('chat', `Stream parse warning (suppressed for 5s): ${(parseError.message || String(parseError)).slice(0, 80)}`)
+            }
+          }
+        }
+      }
+    }
+  } finally {
+    try { reader.releaseLock() } catch { /* already released */ }
+  }
+
+  return { content, toolCalls: [...toolCallsById.values()], raw }
+}
+
 async function appState() {
   const config = await loadConfig()
   return {
@@ -1161,7 +1132,7 @@ async function appState() {
     logs,
     validation: validation(config),
     launch: buildLaunchDetails(config),
-    mcpServers: noopMcpState(),
+    mcpServers: getMcpDisplayState(),
   }
 }
 
@@ -1270,21 +1241,40 @@ function createMainWindow() {
     mainWindow?.show()
   })
 
-  mainWindow.on('close', event => {
+  mainWindow.on('close', async event => {
     if (appIsQuitting) {
       return
     }
 
     event.preventDefault()
-    mainWindow.hide()
-    mainWindow.setSkipTaskbar(true)
-    if (!firstHideNoticeShown) {
-      firstHideNoticeShown = true
-      tray?.displayBalloon?.({
-        title: 'Llama.cpp Desktop 仍在运行',
-        content: '窗口已隐藏到系统托盘，本地服务会继续监听。',
-      })
+
+    const { response } = await dialog.showMessageBox(mainWindow, {
+      type: 'question',
+      title: '关闭窗口',
+      message: '请选择退出方式',
+      detail: '最小化到托盘区可保持本地推理服务继续运行；完全退出将停止所有服务并关闭程序。',
+      buttons: ['最小化到托盘区', '完全退出程序', '取消'],
+      defaultId: 0,
+      cancelId: 2,
+    })
+
+    if (response === 0) {
+      // 最小化到托盘区
+      mainWindow.hide()
+      mainWindow.setSkipTaskbar(true)
+      if (!firstHideNoticeShown) {
+        firstHideNoticeShown = true
+        tray?.displayBalloon?.({
+          title: 'Llama.cpp Desktop 仍在运行',
+          content: '窗口已隐藏到系统托盘，本地服务会继续监听。',
+        })
+      }
+    } else if (response === 1) {
+      // 完全退出
+      appIsQuitting = true
+      app.quit()
     }
+    // response === 2: 取消 — 什么都不做
   })
 
   mainWindow.loadFile(rendererPath)
@@ -1576,63 +1566,9 @@ function registerIpc() {
       throw new Error('模型接口没有返回可读取的流')
     }
 
-    const decoder = new TextDecoder('utf-8')
-    let buffer = ''
-    let content = ''
-    const toolCallsById = new Map()
-    let raw = null
-    let streamAnnounced = false
+    const { content, toolCalls, raw } = await parseStreamEvents(reader, requestId)
 
-    try {
-      while (true) {
-        const { value, done } = await reader.read()
-        if (done) break
-        buffer += decoder.decode(value, { stream: true })
-        const parts = buffer.split(/\r?\n\r?\n/)
-        buffer = parts.pop() || ''
-
-        for (const part of parts) {
-          const lines = part
-            .split(/\r?\n/)
-            .map(line => line.trim())
-            .filter(line => line.startsWith('data:'))
-            .map(line => line.slice(5).trim())
-
-          for (const line of lines) {
-            if (!line || line === '[DONE]') continue
-            try {
-              const data = JSON.parse(line)
-              raw = data
-              const delta = contentFromStreamPayload(data)
-              if (delta) {
-                if (!streamAnnounced) {
-                  addLog('chat', `streaming response for ${requestId}`)
-                  streamAnnounced = true
-                }
-                content += delta
-                sendEvent({ type: 'chat-stream', requestId, delta })
-              }
-              const tcDeltas = toolCallsFromStreamPayload(data)
-              for (const tc of tcDeltas) {
-                const idx = tc.index ?? 0
-                const existing = toolCallsById.get(idx) || { id: '', type: 'function', function: { name: '', arguments: '' } }
-                if (tc.id) existing.id = tc.id
-                if (tc.type) existing.type = tc.type
-                if (tc.function?.name) existing.function.name += tc.function.name
-                if (tc.function?.arguments) existing.function.arguments += tc.function.arguments
-                toolCallsById.set(idx, existing)
-              }
-            } catch {
-              // Ignore malformed stream fragments; llama.cpp can occasionally split aggressively.
-            }
-          }
-        }
-      }
-    } finally {
-      try { reader.releaseLock() } catch { /* already released */ }
-    }
-
-    const toolCalls = [...toolCallsById.values()]
+    // ── Tool calling follow-up ──
 
     // Tool calling loop — execute tools and feed results back to model
     if (toolCalls.length > 0) {
@@ -1692,57 +1628,13 @@ function registerIpc() {
         const nextReader = nextResponse.body?.getReader()
         if (!nextReader) break
 
-        let nextBuf = ''
-        let nextContent = ''
+        const { content: nextContent, toolCalls: newToolCalls } = await parseStreamEvents(nextReader, requestId)
+        finalContent += nextContent
         toolCalls.length = 0
-        toolCallsById.clear()
-
-        try {
-          while (true) {
-            const { value, done } = await nextReader.read()
-            if (done) break
-            nextBuf += decoder.decode(value, { stream: true })
-            const nextParts = nextBuf.split(/\r?\n\r?\n/)
-            nextBuf = nextParts.pop() || ''
-
-            for (const part of nextParts) {
-              const lines = part
-                .split(/\r?\n/)
-                .map(l => l.trim())
-                .filter(l => l.startsWith('data:'))
-                .map(l => l.slice(5).trim())
-
-              for (const line of lines) {
-                if (!line || line === '[DONE]') continue
-                try {
-                  const data = JSON.parse(line)
-                  const delta = contentFromStreamPayload(data)
-                  if (delta) {
-                    nextContent += delta
-                    finalContent += delta
-                    sendEvent({ type: 'chat-stream', requestId, delta })
-                  }
-                  const tcDeltas = toolCallsFromStreamPayload(data)
-                  for (const tc of tcDeltas) {
-                    const idx = tc.index ?? 0
-                    const existing = toolCallsById.get(idx) || { id: '', type: 'function', function: { name: '', arguments: '' } }
-                    if (tc.id) existing.id = tc.id
-                    if (tc.type) existing.type = tc.type
-                    if (tc.function?.name) existing.function.name += tc.function.name
-                    if (tc.function?.arguments) existing.function.arguments += tc.function.arguments
-                    toolCallsById.set(idx, existing)
-                  }
-                } catch { /* ignore malformed fragments */ }
-              }
-            }
-          }
-        } finally {
-          try { nextReader.releaseLock() } catch { /* already released */ }
-        }
+        toolCalls.push(...newToolCalls)
 
         // Push assistant message for next round
-        updatedMessages.push({ role: 'assistant', content: nextContent || null, tool_calls: [...toolCallsById.values()] })
-        toolCalls.push(...toolCallsById.values())
+        updatedMessages.push({ role: 'assistant', content: nextContent || null, tool_calls: newToolCalls })
 
         if (nextContent) content = nextContent
       }
@@ -1763,6 +1655,23 @@ function registerIpc() {
     return result.canceled ? null : result.filePaths[0]
   })
 
+  ipcMain.handle('llama:save-file', async (_event, payload) => {
+    const { defaultPath, content, filters } = payload || {}
+    const result = await dialog.showSaveDialog(mainWindow, {
+      defaultPath: defaultPath || 'conversation.md',
+      filters: filters || [{ name: 'Markdown', extensions: ['md'] }, { name: 'All Files', extensions: ['*'] }],
+    })
+    if (result.canceled) return null
+    const target = result.filePath
+    try {
+      await writeFile(target, content, 'utf8')
+      return { saved: true, path: target }
+    } catch (err) {
+      addLog('error', `save-file failed: ${err instanceof Error ? err.message : String(err)}`)
+      return { saved: false, error: err instanceof Error ? err.message : String(err) }
+    }
+  })
+
   ipcMain.handle('llama:pick-attachments', async (_event, payload) => {
     const kind = payload?.kind || 'file'
     const filterMap = {
@@ -1775,7 +1684,7 @@ function registerIpc() {
         { name: 'All Files', extensions: ['*'] },
       ],
       text: [
-        { name: 'Text and Code', extensions: ['txt', 'md', 'json', 'toml', 'yaml', 'yml', 'csv', 'log', 'py', 'js', 'ts', 'tsx', 'html', 'css', 'c', 'cpp', 'h', 'hpp'] },
+        { name: 'Text and Code', extensions: ['txt', 'md', 'json', 'toml', 'yaml', 'yml', 'csv', 'log', 'py', 'js', 'ts', 'tsx', 'html', 'css', 'c', 'cpp', 'h', 'hpp', 'bat', 'cmd', 'sh', 'ps1', 'xml', 'ini', 'cfg', 'conf', 'env', 'gitignore', 'dockerfile', 'Makefile', 'rs', 'go', 'java', 'rb', 'php', 'sql', 'swift', 'kt', 'scala', 'lua', 'r', 'pl', 'dart', 'vue', 'svelte', 'astro'] },
         { name: 'All Files', extensions: ['*'] },
       ],
       pdf: [
@@ -1783,7 +1692,7 @@ function registerIpc() {
         { name: 'All Files', extensions: ['*'] },
       ],
       file: [
-        { name: 'Documents and Images', extensions: ['txt', 'md', 'json', 'toml', 'yaml', 'yml', 'csv', 'log', 'py', 'js', 'ts', 'tsx', 'html', 'css', 'pdf', 'mp3', 'wav', 'flac', 'm4a', 'ogg', 'png', 'jpg', 'jpeg', 'webp'] },
+        { name: 'Documents and Images', extensions: ['txt', 'md', 'json', 'toml', 'yaml', 'yml', 'csv', 'log', 'py', 'js', 'ts', 'tsx', 'html', 'css', 'c', 'cpp', 'h', 'hpp', 'bat', 'cmd', 'sh', 'ps1', 'xml', 'ini', 'cfg', 'conf', 'env', 'gitignore', 'dockerfile', 'Makefile', 'rs', 'go', 'java', 'rb', 'php', 'sql', 'swift', 'kt', 'scala', 'lua', 'r', 'pl', 'dart', 'vue', 'svelte', 'astro', 'pdf', 'mp3', 'wav', 'flac', 'm4a', 'ogg', 'png', 'jpg', 'jpeg', 'webp', 'gif', 'bmp'] },
         { name: 'All Files', extensions: ['*'] },
       ],
     }
@@ -1814,6 +1723,28 @@ function registerIpc() {
       }
     }
     return attachments
+  })
+
+  ipcMain.handle('llama:build-pasted-attachment', async (_event, filePath) => {
+    try {
+      return await buildAttachment(filePath)
+    } catch (err) {
+      addLog('error', `paste attachment failed: ${err instanceof Error ? err.message : String(err)}`)
+      return null
+    }
+  })
+
+  ipcMain.handle('llama:build-image-attachment', async (_event, uint8Array, mimeType) => {
+    try {
+      const buffer = Buffer.from(uint8Array)
+      const ext = String(mimeType || 'image/png').split('/')[1] || 'png'
+      const tmpPath = path.join(app.getPath('temp'), `paste-${Date.now()}.${ext}`)
+      await writeFile(tmpPath, buffer)
+      return await buildAttachment(tmpPath)
+    } catch (err) {
+      addLog('error', `paste image attachment failed: ${err instanceof Error ? err.message : String(err)}`)
+      return null
+    }
   })
 
   ipcMain.handle('llama:reveal-path', async (_event, payload) => {

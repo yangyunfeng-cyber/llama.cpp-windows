@@ -45,6 +45,7 @@ const state = {
   assistants: [],
   activeAssistantId: '',
   assistantDialog: null,
+  assistantDropdownOpen: false,
 }
 
 function escapeHtml(value) {
@@ -57,6 +58,27 @@ function escapeHtml(value) {
 
 function escapeAttribute(value) {
   return escapeHtml(value).replace(/'/g, '&#39;')
+}
+
+function sanitizeFilename(value) {
+  return String(value || 'chat').replace(/[<>:"/\\|?*]/g, '_').slice(0, 120)
+}
+
+function sessionToMarkdown(session) {
+  const lines = ['# ' + (session.title || '对话'), '', '> ' + new Date(session.updatedAt).toLocaleString(), '']
+  for (const msg of (session.messages || [])) {
+    const role = String(msg.role || 'user').toUpperCase()
+    const content = String(msg.content || '')
+    lines.push('### ' + role)
+    if (Array.isArray(msg.attachments) && msg.attachments.length) {
+      for (const att of msg.attachments) {
+        if (att.name) lines.push('*[附件: ' + att.name + ']*')
+      }
+      lines.push('')
+    }
+    lines.push('', content, '', '---', '')
+  }
+  return lines.join('\n')
 }
 
 function isNearBottom(element) {
@@ -208,7 +230,7 @@ function buildBetterModelInfoRows(info) {
   const formatTokens = value => {
     const number = Number(value)
     if (!Number.isFinite(number) || number <= 0) return '未读取'
-    return `${number.toLocaleString('zh-CN')} 个代币`
+    return `${number.toLocaleString('zh-CN')} tokens`
   }
   const formatParams = value => {
     const number = Number(value)
@@ -514,7 +536,7 @@ function updateLiveStats(message) {
   const tokens = message.tokens || estimateTokens(message.content)
   message.latencyMs = latencyMs
   message.estimatedTokens = estimateTokens(message.content)
-  message.speed = tokens ? `${(Number(tokens) / (latencyMs / 1000)).toFixed(2)} t/s` : ''
+  message.speed = tokens ? `${(Number(tokens) / (latencyMs / 1000)).toFixed(2)} token/s` : ''
 }
 
 function renderCodeAwareText(text, messageIndex, counter) {
@@ -1025,10 +1047,10 @@ function renderMessageMeta(message) {
   if (message.role !== 'assistant') return ''
   const tokens = message.tokens || message.estimatedTokens || estimateTokens(message.content)
   const latencyMs = message.latencyMs || (message.streaming ? Date.now() - (message.startedAt || message.createdAt || Date.now()) : 0)
-  const speed = message.speed || (tokens && latencyMs ? `${(Number(tokens) / (latencyMs / 1000)).toFixed(2)} t/s` : '')
+  const speed = message.speed || (tokens && latencyMs ? `${(Number(tokens) / (latencyMs / 1000)).toFixed(2)} token/s` : '')
   const pieces = [
     `<span class="model-pill">◇ ${escapeHtml(message.model || modelName())}</span>`,
-    `<span>▦ ${escapeHtml(tokens || 0)} 个代币</span>`,
+    `<span>▦ ${escapeHtml(tokens || 0)} tokens</span>`,
     latencyMs ? `<span>◷ ${(latencyMs / 1000).toFixed(1)}s</span>` : '<span>◷ 0.0s</span>',
     speed ? `<span>⌁ ${escapeHtml(speed)}</span>` : '',
     message.streaming ? '<span>生成中</span>' : '',
@@ -1213,10 +1235,18 @@ function renderSidebar() {
       <button type="button" class="side-action ${state.view === 'terminal' ? 'active' : ''}" data-action="show-terminal">终端日志</button>
 
       <div class="assistant-row">
-        <select class="assistant-select" data-action="select-assistant">
-          <option value="" ${state.activeAssistantId === '' ? 'selected' : ''}>无角色</option>
-          ${state.assistants.map(function(a) { return '<option value="' + escapeAttribute(a.id) + '" ' + (state.activeAssistantId === a.id ? 'selected' : '') + '>' + escapeHtml(a.name) + '</option>' }).join('')}
-        </select>
+        <div class="assistant-dropdown">
+          <button type="button" class="assistant-dropdown-toggle" data-action="toggle-assistant-dropdown">
+            <span class="assistant-dropdown-label">${state.activeAssistantId ? escapeHtml(state.assistants.find(function(a) { return a.id === state.activeAssistantId })?.name || '无角色') : '无角色'}</span>
+            <span class="assistant-dropdown-arrow">▾</span>
+          </button>
+          ${state.assistantDropdownOpen ? `
+          <div class="assistant-dropdown-menu">
+            <button type="button" class="assistant-dropdown-item ${state.activeAssistantId === '' ? 'active' : ''}" data-action="select-assistant-item" data-assistant-id="">无角色</button>
+            ${state.assistants.map(function(a) { return '<button type="button" class="assistant-dropdown-item ' + (state.activeAssistantId === a.id ? 'active' : '') + '" data-action="select-assistant-item" data-assistant-id="' + escapeAttribute(a.id) + '">' + escapeHtml(a.name) + '</button>' }).join('')}
+          </div>
+          ` : ''}
+        </div>
         <button type="button" class="outline-btn small-btn" data-action="manage-assistants">管理助手</button>
       </div>
       <div class="side-section-label">历史对话</div>
@@ -2016,14 +2046,14 @@ function makeAssistantPlaceholder() {
 
 function finalizeAssistantMessage(assistant, result, latencyMs, fallbackContent) {
   const tokens = result.raw?.usage?.total_tokens || result.raw?.usage?.completion_tokens || ''
-  const speed = tokens && latencyMs ? `${(Number(tokens) / (latencyMs / 1000)).toFixed(2)} t/s` : ''
+  const speed = tokens && latencyMs ? `${(Number(tokens) / (latencyMs / 1000)).toFixed(2)} token/s` : ''
   if (assistant?.role === 'assistant') {
     const estimatedTokens = estimateTokens(assistant.content || result.content)
     assistant.content = result.content || assistant.content || fallbackContent
     assistant.tokens = tokens || estimatedTokens
     assistant.estimatedTokens = estimatedTokens
     assistant.latencyMs = latencyMs
-    assistant.speed = speed || (assistant.tokens ? `${(Number(assistant.tokens) / (latencyMs / 1000)).toFixed(2)} t/s` : '')
+    assistant.speed = speed || (assistant.tokens ? `${(Number(assistant.tokens) / (latencyMs / 1000)).toFixed(2)} token/s` : '')
     assistant.streaming = false
   }
 }
@@ -2184,385 +2214,164 @@ async function pickAttachment(kind) {
   }
 }
 
-appEl.addEventListener('click', event => {
-  const target = event.target.closest('button, .settings-backdrop, .preview-backdrop, .dialog-backdrop, .attach-menu-backdrop')
-  if (!target) return
+// ── Click action dispatch map ──
+// Each handler can return false to signal "don't render" (render is called by caller, or the handler calls it itself)
 
-  const seed = target.dataset.seed
-  if (seed) {
-    state.chatInput = seed
-    state.active = 'chat'
-    state.view = 'chat'
-    render()
-    return
-  }
-
-  const sessionId = target.dataset.session
-  if (sessionId) {
-    openSession(sessionId)
-    render({ jumpToBottom: true })
-    return
-  }
-
-  const section = target.dataset.section
-  if (section) {
-    state.active = section
-    state.settingsOpen = true
-    render()
-    return
-  }
-
-  const pickField = target.dataset.pick
-  if (pickField) {
-    void pick(pickField, target.dataset.kind)
-    return
-  }
-
-  const action = target.dataset.action
-  if (action === 'open-model-info') {
-    void openModelInfo()
-    return
-  }
-  if (action === 'close-model-info') {
-    state.modelInfoOpen = false
-    render({ preserveChatScroll: true })
-    return
-  }
-  if (action === 'copy-model-info') {
-    void navigator.clipboard.writeText(String(target.dataset.copy || ''))
-    setToast('已复制到剪贴板', { preserveChatScroll: true })
-    return
-  }
-  if (action === 'copy-launch-command') {
-    const command = state.launch?.preview || ''
-    if (command && !state.launch?.error) {
-      void navigator.clipboard.writeText(command)
-      setToast('启动命令已复制', { preserveChatScroll: true })
-    }
-    return
-  }
-  if (action === 'history-edit') {
+const clickActions = {
+  'open-model-info': () => { void openModelInfo() },
+  'close-model-info': () => { state.modelInfoOpen = false; render({ preserveChatScroll: true }) },
+  'copy-model-info': (target) => { void navigator.clipboard.writeText(String(target.dataset.copy || '')); setToast('已复制到剪贴板', { preserveChatScroll: true }) },
+  'copy-launch-command': () => {
+    const cmd = state.launch?.preview || ''
+    if (cmd && !state.launch?.error) { void navigator.clipboard.writeText(cmd); setToast('启动命令已复制', { preserveChatScroll: true }) }
+  },
+  'history-edit': (target) => {
     const session = state.sessions.find(item => item.id === target.dataset.sessionId)
-    if (session) {
-      state.historyDialog = { type: 'edit', sessionId: session.id }
-      render({ preserveChatScroll: true })
-      setTimeout(() => document.querySelector('[data-history-title-input]')?.focus(), 0)
-    }
-    return
-  }
-  if (action === 'history-export') {
+    if (session) { state.historyDialog = { type: 'edit', sessionId: session.id }; render({ preserveChatScroll: true }); setTimeout(() => document.querySelector('[data-history-title-input]')?.focus(), 0) }
+  },
+  'history-export': (target) => {
     const session = state.sessions.find(item => item.id === target.dataset.sessionId)
-    if (session) {
-      void navigator.clipboard.writeText(JSON.stringify(session, null, 2))
-      setToast('Conversation exported to clipboard', { preserveChatScroll: true })
-    }
-    return
-  }
-  if (action === 'history-delete') {
-    state.historyDialog = { type: 'delete', sessionId: target.dataset.sessionId }
-    render({ preserveChatScroll: true })
-    return
-  }
-  if (action === 'close-history-dialog') {
-    state.historyDialog = null
-    render({ preserveChatScroll: true })
-    return
-  }
-  if (action === 'history-save-title') {
+    if (!session) return
+    const md = sessionToMarkdown(session)
+    window.llamaDesktop.saveFile({ defaultPath: `${sanitizeFilename(session.title || 'chat')}.md`, content: md, filters: [{ name: 'Markdown', extensions: ['md'] }, { name: 'All Files', extensions: ['*'] }] })
+      .then(r => { if (r?.saved) setToast('对话已导出到 ' + r.path); else if (r?.error) setToast('导出失败: ' + r.error) })
+      .catch(e => setToast(e.message || String(e)))
+  },
+  'history-delete': (target) => { state.historyDialog = { type: 'delete', sessionId: target.dataset.sessionId }; render({ preserveChatScroll: true }) },
+  'close-history-dialog': () => { state.historyDialog = null; render({ preserveChatScroll: true }) },
+  'history-save-title': (target) => {
     const session = state.sessions.find(item => item.id === target.dataset.sessionId)
     const input = document.querySelector('[data-history-title-input]')
     const nextTitle = String(input?.value || '').trim()
-    if (session && nextTitle) {
-      session.title = nextTitle.slice(0, 80)
-      session.updatedAt = Date.now()
-      state.historyDialog = null
-      persistSessions()
-      render({ preserveChatScroll: true, resetHistoryScroll: true })
-    }
-  }
-  if (action === 'history-confirm-delete') {
-    const sessionId = target.dataset.sessionId
-    state.sessions = state.sessions.filter(item => item.id !== sessionId)
-    if (state.currentSessionId === sessionId) {
-      state.currentSessionId = makeSessionId()
-      state.chatMessages = []
-      state.chatInput = ''
-      state.attachments = []
-    }
-    state.historyDialog = null
-    persistSessions()
-    render({ jumpToBottom: true, resetHistoryScroll: true })
-    return
-  }
-  if (action === 'toggle-settings') {
+    if (session && nextTitle) { session.title = nextTitle.slice(0, 80); session.updatedAt = Date.now(); state.historyDialog = null; persistSessions(); render({ preserveChatScroll: true, resetHistoryScroll: true }) }
+  },
+  'history-confirm-delete': (target) => {
+    const sid = target.dataset.sessionId
+    state.sessions = state.sessions.filter(item => item.id !== sid)
+    if (state.currentSessionId === sid) { state.currentSessionId = makeSessionId(); state.chatMessages = []; state.chatInput = ''; state.attachments = [] }
+    state.historyDialog = null; persistSessions(); render({ jumpToBottom: true, resetHistoryScroll: true })
+  },
+  'toggle-settings': () => {
     state.settingsOpen = !state.settingsOpen
-    if (state.settingsOpen && !settingsTabs.some(([id]) => id === state.active)) {
-      state.active = 'overview'
-    }
-    state.attachmentMenuOpen = false
-    state.attachmentMenuPosition = null
-    render()
-  }
-  if (action === 'toggle-attachment-menu') {
-    if (state.attachmentMenuOpen) {
-      state.attachmentMenuOpen = false
-      state.attachmentMenuPosition = null
-    } else {
-      openAttachmentMenu(target)
-    }
-    render()
-    return
-  }
-  if (action === 'close-attachment-menu') {
-    state.attachmentMenuOpen = false
-    state.attachmentMenuPosition = null
-    render()
-    return
-  }
-  if (action === 'copy-code') {
+    if (state.settingsOpen && !settingsTabs.some(([id]) => id === state.active)) state.active = 'overview'
+    state.attachmentMenuOpen = false; state.attachmentMenuPosition = null; render()
+  },
+  'toggle-attachment-menu': (target) => { if (state.attachmentMenuOpen) { state.attachmentMenuOpen = false; state.attachmentMenuPosition = null } else { openAttachmentMenu(target) }; render() },
+  'close-attachment-menu': () => { state.attachmentMenuOpen = false; state.attachmentMenuPosition = null; render() },
+  'copy-code': (target) => {
     const block = getCodeBlock(target.dataset.messageIndex, target.dataset.codeIndex)
-    if (block) {
-      void navigator.clipboard.writeText(block.value || '')
-      setToast('代码已复制到剪贴板', { preserveChatScroll: true })
-    }
-    return
-  }
-  var mcpId = target.dataset.mcpId
-  if (action === 'mcp-show-form') {
-    state.mcpForm = {}
-    state.active = 'mcp'
-    state.view = 'settings'
-    render({ preserveChatScroll: true })
-    return
-  }
-  if (action === 'mcp-cancel-form') {
-    state.mcpForm = null
-    render({ preserveChatScroll: true })
-    return
-  }
-  if (action === 'mcp-add') {
-    var nameEl = document.querySelector('[data-mcp-form="name"]')
-    var cmdEl = document.querySelector('[data-mcp-form="command"]')
-    var name = String(nameEl?.value || '').trim()
-    var cmd = String(cmdEl?.value || '').trim()
+    if (block) { void navigator.clipboard.writeText(block.value || ''); setToast('代码已复制到剪贴板', { preserveChatScroll: true }) }
+  },
+  'mcp-show-form': () => { state.mcpForm = {}; state.active = 'mcp'; state.view = 'settings'; render({ preserveChatScroll: true }) },
+  'mcp-cancel-form': () => { state.mcpForm = null; render({ preserveChatScroll: true }) },
+  'mcp-add': () => {
+    const nameEl = document.querySelector('[data-mcp-form="name"]'), cmdEl = document.querySelector('[data-mcp-form="command"]')
+    const name = String(nameEl?.value || '').trim(), cmd = String(cmdEl?.value || '').trim()
     if (!cmd) { setToast('请输入启动命令'); return }
-    state.mcpForm = null
-    state.busy = true
-    render()
-    window.llamaDesktop.mcpAdd({ name: name || 'MCP Server', command: cmd }).then(function(r) {
-      state.mcpServers = r
-      setToast('MCP 服务器已添加')
-    }).catch(function(e) { setToast(e.message || String(e)) }).finally(function() {
-      state.busy = false
-      render({ preserveChatScroll: true })
-    })
-    return
-  }
-  if (action === 'mcp-remove' && mcpId) {
-    window.llamaDesktop.mcpRemove(mcpId).then(function(r) {
-      state.mcpServers = r
-      render({ preserveChatScroll: true })
-    }).catch(function(e) { setToast(e.message || String(e)) })
-    return
-  }
-  if (action === 'mcp-restart' && mcpId) {
-    window.llamaDesktop.mcpRestart(mcpId).then(function(r) {
-      state.mcpServers = r
-      render({ preserveChatScroll: true })
-    }).catch(function(e) { setToast(e.message || String(e)) })
-    return
-  }
-  if (action === 'mcp-stop' && mcpId) {
-    window.llamaDesktop.mcpStop(mcpId).then(function(r) {
-      state.mcpServers = r
-      render({ preserveChatScroll: true })
-    }).catch(function(e) { setToast(e.message || String(e)) })
-    return
-  }
-  if (action === 'preview-code') {
+    state.mcpForm = null; state.busy = true; render()
+    window.llamaDesktop.mcpAdd({ name: name || 'MCP Server', command: cmd }).then(r => { state.mcpServers = r; setToast('MCP 服务器已添加') }).catch(e => setToast(e.message || String(e))).finally(() => { state.busy = false; render({ preserveChatScroll: true }) })
+  },
+  'mcp-remove': (target) => { const id = target.dataset.mcpId; if (id) window.llamaDesktop.mcpRemove(id).then(r => { state.mcpServers = r; render({ preserveChatScroll: true }) }).catch(e => setToast(e.message || String(e))) },
+  'mcp-restart': (target) => { const id = target.dataset.mcpId; if (id) window.llamaDesktop.mcpRestart(id).then(r => { state.mcpServers = r; render({ preserveChatScroll: true }) }).catch(e => setToast(e.message || String(e))) },
+  'mcp-stop': (target) => { const id = target.dataset.mcpId; if (id) window.llamaDesktop.mcpStop(id).then(r => { state.mcpServers = r; render({ preserveChatScroll: true }) }).catch(e => setToast(e.message || String(e))) },
+  'preview-code': (target) => {
     const block = getCodeBlock(target.dataset.messageIndex, target.dataset.codeIndex)
-    if (block) {
-      state.preview = {
-        type: 'code',
-        code: block.value || '',
-        language: block.language || 'html',
-        title: `${String(block.language || 'HTML').toUpperCase()} 预览`,
-      }
-      render({ preserveChatScroll: true })
-    }
-  }
-  if (action === 'preview-image') {
-    state.preview = {
-      type: 'image',
-      src: target.dataset.src || '',
-      title: target.dataset.title || '图片预览',
-    }
-    render({ preserveChatScroll: true })
-  }
-  if (action === 'close-preview') {
-    state.preview = null
-    render({ preserveChatScroll: true })
-  }
-  if (action === 'pick-file') void pickAttachment('file')
-  if (action === 'pick-image') void pickAttachment('image')
-  if (action === 'pick-audio') void pickAttachment('audio')
-  if (action === 'pick-text') void pickAttachment('text')
-  if (action === 'pick-pdf') void pickAttachment('pdf')
-  if (action === 'insert-system-message') {
+    if (block) { state.preview = { type: 'code', code: block.value || '', language: block.language || 'html', title: `${String(block.language || 'HTML').toUpperCase()} 预览` }; render({ preserveChatScroll: true }) }
+  },
+  'preview-image': (target) => { state.preview = { type: 'image', src: target.dataset.src || '', title: target.dataset.title || '图片预览' }; render({ preserveChatScroll: true }) },
+  'close-preview': () => { state.preview = null; render({ preserveChatScroll: true }) },
+  'pick-file': () => { void pickAttachment('file') },
+  'pick-image': () => { void pickAttachment('image') },
+  'pick-audio': () => { void pickAttachment('audio') },
+  'pick-text': () => { void pickAttachment('text') },
+  'pick-pdf': () => { void pickAttachment('pdf') },
+  'insert-system-message': () => {
     if (!state.currentSessionId) state.currentSessionId = makeSessionId()
-    state.chatMessages.push({
-      role: 'system',
-      content: '系统消息：请在这里写给模型的长期要求，发送下一条消息时会一起带上。',
-      createdAt: Date.now(),
-    })
-    state.attachmentMenuOpen = false
-    state.attachmentMenuPosition = null
-    saveCurrentSession()
-    render()
-  }
-  if (action === 'remove-attachment') {
-    state.attachments.splice(Number(target.dataset.index), 1)
-    render()
-  }
-  if (action === 'copy-message') {
+    state.chatMessages.push({ role: 'system', content: '系统消息：请在这里写给模型的长期要求，发送下一条消息时会一起带上。', createdAt: Date.now() })
+    state.attachmentMenuOpen = false; state.attachmentMenuPosition = null; saveCurrentSession(); render()
+  },
+  'remove-attachment': (target) => { state.attachments.splice(Number(target.dataset.index), 1); render() },
+  'copy-message': (target) => {
     const message = state.chatMessages[Number(target.dataset.index)]
-    if (message) {
-      void navigator.clipboard.writeText(message.content || '')
-      setToast('已复制到剪贴板', { preserveChatScroll: true })
-    }
-  }
-  if (action === 'edit-message') {
-    const index = Number(target.dataset.index)
-    const message = state.chatMessages[index]
-    if (message) {
-      state.chatInput = message.content || ''
-      state.attachments = message.attachments || []
-      state.chatMessages.splice(index, 1)
-      saveCurrentSession()
-      render()
-      setTimeout(() => document.querySelector('[data-chat-input]')?.focus(), 0)
-    }
-  }
-  if (action === 'delete-message') {
-    state.chatMessages.splice(Number(target.dataset.index), 1)
-    saveCurrentSession()
-    render()
-  }
-  if (action === 'retry-message') void retryMessage(Number(target.dataset.index))
-  if (action === 'manage-assistants') {
-    state.assistantDialog = { type: 'list' }
-    render({ preserveChatScroll: true })
-    return
-  }
-  if (action === 'new-assistant-form') {
-    state.assistantDialog = { type: 'new' }
-    render({ preserveChatScroll: true })
-    setTimeout(function() { var el = document.getElementById('asstName'); if (el) el.focus() }, 50)
-    return
-  }
-  if (action === 'close-assistant') {
-    state.assistantDialog = null
-    render({ preserveChatScroll: true })
-    return
-  }
-  if (action === 'switch-assistant' && target.dataset.assistantId) {
-    if (state.assistantDialog) {
-      state.assistantDialog = null
-      render({ preserveChatScroll: true })
-    }
-    selectAssistant(target.dataset.assistantId)
-    return
-  }
-  if (action === 'save-assistant') {
-    var asstName = document.getElementById('asstName')
-    var asstPrompt = document.getElementById('asstPrompt')
-    var name = String(asstName?.value || '').trim()
-    var prompt = String(asstPrompt?.value || '').trim()
+    if (message) { void navigator.clipboard.writeText(message.content || ''); setToast('已复制到剪贴板', { preserveChatScroll: true }) }
+  },
+  'edit-message': (target) => {
+    const index = Number(target.dataset.index), message = state.chatMessages[index]
+    if (message) { state.chatInput = message.content || ''; state.attachments = message.attachments || []; state.chatMessages.splice(index, 1); saveCurrentSession(); render(); setTimeout(() => document.querySelector('[data-chat-input]')?.focus(), 0) }
+  },
+  'delete-message': (target) => { state.chatMessages.splice(Number(target.dataset.index), 1); saveCurrentSession(); render() },
+  'retry-message': (target) => { void retryMessage(Number(target.dataset.index)) },
+  'manage-assistants': () => { state.assistantDialog = { type: 'list' }; render({ preserveChatScroll: true }) },
+  'new-assistant-form': () => { state.assistantDialog = { type: 'new' }; render({ preserveChatScroll: true }); setTimeout(() => { const el = document.getElementById('asstName'); if (el) el.focus() }, 50) },
+  'close-assistant': () => { state.assistantDialog = null; render({ preserveChatScroll: true }) },
+  'switch-assistant': (target) => { if (state.assistantDialog) { state.assistantDialog = null; render({ preserveChatScroll: true }) }; selectAssistant(target.dataset.assistantId) },
+  'toggle-assistant-dropdown': () => { state.assistantDropdownOpen = !state.assistantDropdownOpen; render({ preserveChatScroll: true }) },
+  'select-assistant-item': (target) => { state.assistantDropdownOpen = false; selectAssistant(target.dataset.assistantId || '') },
+  'save-assistant': (target) => {
+    const asstName = document.getElementById('asstName'), asstPrompt = document.getElementById('asstPrompt')
+    const name = String(asstName?.value || '').trim(), prompt = String(asstPrompt?.value || '').trim()
     if (!name) { setToast('请输入助手名称'); return }
-    var existingId = target.dataset.assistantId
-    if (existingId) {
-      var asst = state.assistants.find(function(a) { return a.id === existingId })
-      if (asst) {
-        asst.name = name; asst.systemPrompt = prompt
-      } else {
-        setToast('该助手已不存在，将创建新助手。')
-        createAssistant(name, prompt)
-      }
-    } else {
-      createAssistant(name, prompt)
-    }
-    state.assistantDialog = null
-    persistAssistants()
-    render({ preserveChatScroll: true })
-    return
-  }
-  if (action === 'edit-assistant' && target.dataset.assistantId) {
-    state.assistantDialog = { type: 'edit', id: target.dataset.assistantId }
-    render({ preserveChatScroll: true })
-    setTimeout(function() { var el = document.getElementById('asstName'); if (el) el.focus() }, 50)
-    return
-  }
-  if (action === 'delete-assistant' && target.dataset.assistantId) {
-    var delAsst = state.assistants.find(function(a) { return a.id === target.dataset.assistantId })
+    const existingId = target.dataset.assistantId
+    if (existingId) { const asst = state.assistants.find(a => a.id === existingId); if (asst) { asst.name = name; asst.systemPrompt = prompt } else { setToast('该助手已不存在，将创建新助手。'); createAssistant(name, prompt) } } else { createAssistant(name, prompt) }
+    state.assistantDialog = null; persistAssistants(); render({ preserveChatScroll: true })
+  },
+  'edit-assistant': (target) => { state.assistantDialog = { type: 'edit', id: target.dataset.assistantId }; render({ preserveChatScroll: true }); setTimeout(() => { const el = document.getElementById('asstName'); if (el) el.focus() }, 50) },
+  'delete-assistant': (target) => {
+    const delAsst = state.assistants.find(a => a.id === target.dataset.assistantId)
     if (delAsst && !confirm('确定删除助手"' + delAsst.name + '"吗？此操作无法撤销，且会永久删除该助手及其系统提示词。')) return
-    deleteAssistant(target.dataset.assistantId)
-    state.assistantDialog = null
+    deleteAssistant(target.dataset.assistantId); state.assistantDialog = null; render({ preserveChatScroll: true })
+  },
+  'clear-context': () => { clearContext() },
+  'delete-all-messages': () => { deleteAllMessages() },
+  'confirm-clear': () => { doClearContext() },
+  'confirm-delete-all': () => { doDeleteAllMessages() },
+  'dismiss-dialog': () => { state.clearDialog = null; render({ preserveChatScroll: true }) },
+  'close-settings': () => { state.settingsOpen = false; render() },
+  'toggle-sidebar': () => { state.sidebarCollapsed = !state.sidebarCollapsed; render() },
+  'focus-chat': () => { state.active = 'chat'; state.view = 'chat'; state.sidebarPanel = 'chats'; render({ resetHistoryScroll: true }); setTimeout(() => { const s = document.querySelector('[data-history-search]'); s?.focus(); s?.select?.() }, 0) },
+  'return-chat': () => { state.active = 'chat'; state.view = 'chat'; state.sidebarPanel = 'chats'; render(); setTimeout(() => document.querySelector('[data-chat-input]')?.focus(), 0) },
+  'show-terminal': () => { state.view = 'terminal'; state.sidebarPanel = 'chats'; state.attachmentMenuOpen = false; render() },
+  'open-log-settings': () => { state.active = 'logs'; state.settingsOpen = true; state.view = 'terminal'; state.sidebarPanel = 'chats'; render() },
+  'new-chat': () => { startFreshSession(); render() },
+  'save': () => { void save() },
+  'start': () => { void start() },
+  'stop': () => { void stop() },
+  'health': () => { void health() },
+  'send-chat': () => { void sendChat() },
+}
+
+appEl.addEventListener('click', event => {
+  // close assistant dropdown when clicking outside
+  if (state.assistantDropdownOpen && !event.target.closest('.assistant-dropdown')) {
+    state.assistantDropdownOpen = false
     render({ preserveChatScroll: true })
     return
   }
-  if (action === 'clear-context') { clearContext(); return }
-  if (action === 'delete-all-messages') { deleteAllMessages(); return }
-  if (action === 'confirm-clear') { doClearContext(); return }
-  if (action === 'confirm-delete-all') { doDeleteAllMessages(); return }
-  if (action === 'dismiss-dialog') { state.clearDialog = null; render({ preserveChatScroll: true }); return }
-  if (action === 'close-settings') {
-    state.settingsOpen = false
-    render()
+  const target = event.target.closest('button, .settings-backdrop, .preview-backdrop, .dialog-backdrop, .attach-menu-backdrop')
+  if (!target) return
+
+  // Seed buttons (chat input prefill)
+  const seed = target.dataset.seed
+  if (seed) { state.chatInput = seed; state.active = 'chat'; state.view = 'chat'; render(); return }
+
+  // Session switching
+  const sessionId = target.dataset.session
+  if (sessionId) { openSession(sessionId); render({ jumpToBottom: true }); return }
+
+  // Settings section navigation
+  const section = target.dataset.section
+  if (section) { state.active = section; state.settingsOpen = true; render(); return }
+
+  // File picker buttons
+  const pickField = target.dataset.pick
+  if (pickField) { void pick(pickField, target.dataset.kind); return }
+
+  // Action dispatch
+  const action = target.dataset.action
+  if (action && clickActions[action]) {
+    clickActions[action](target)
+    return
   }
-  if (action === 'toggle-sidebar') {
-    state.sidebarCollapsed = !state.sidebarCollapsed
-    render()
-  }
-  if (action === 'focus-chat') {
-    state.active = 'chat'
-    state.view = 'chat'
-    state.sidebarPanel = 'chats'
-    render({ resetHistoryScroll: true })
-    setTimeout(() => {
-      const search = document.querySelector('[data-history-search]')
-      search?.focus()
-      search?.select?.()
-    }, 0)
-  }
-  if (action === 'return-chat') {
-    state.active = 'chat'
-    state.view = 'chat'
-    state.sidebarPanel = 'chats'
-    render()
-    setTimeout(() => document.querySelector('[data-chat-input]')?.focus(), 0)
-  }
-  if (action === 'show-terminal') {
-    state.view = 'terminal'
-    state.sidebarPanel = 'chats'
-    state.attachmentMenuOpen = false
-    render()
-  }
-  if (action === 'open-log-settings') {
-    state.active = 'logs'
-    state.settingsOpen = true
-    state.view = 'terminal'
-    state.sidebarPanel = 'chats'
-    render()
-  }
-  if (action === 'new-chat') {
-    startFreshSession()
-    render()
-  }
-  if (action === 'save') void save()
-  if (action === 'start') void start()
-  if (action === 'stop') void stop()
-  if (action === 'health') void health()
-  if (action === 'send-chat') void sendChat()
 })
 
 let historySearchTimer = null
@@ -2599,13 +2408,12 @@ appEl.addEventListener('input', event => {
   state.dirty = true
 })
 
-appEl.addEventListener('change', event => {
-  if (event.target.dataset?.action === 'select-assistant') {
-    selectAssistant(event.target.value)
-  }
-})
-
 appEl.addEventListener('keydown', event => {
+  if (event.key === 'Escape' && state.assistantDropdownOpen) {
+    state.assistantDropdownOpen = false
+    render({ preserveChatScroll: true })
+    return
+  }
   if (event.key === 'Escape' && state.historyDialog) {
     state.historyDialog = null
     render({ preserveChatScroll: true })
@@ -2632,6 +2440,57 @@ appEl.addEventListener('scroll', event => {
   if (!state.chatBusy) return
   state.userScrolledAway = !isNearBottom(event.target)
 }, { capture: true, passive: true })
+
+appEl.addEventListener('paste', async event => {
+  const clipboardData = event.clipboardData
+  if (!clipboardData) return
+
+  const items = clipboardData.items
+  const files = clipboardData.files
+  if (!items || (!files.length && items.length === 0)) return
+
+  // Check if there are files or images in the clipboard
+  let hasFilesOrImages = files.length > 0
+  let imageItems = []
+  for (const item of items) {
+    if (item.type.startsWith('image/')) {
+      imageItems.push(item)
+      hasFilesOrImages = true
+    }
+  }
+
+  if (!hasFilesOrImages) return // plain text paste, let browser handle it
+
+  event.preventDefault()
+
+  // Handle files (from Explorer copy)
+  for (const file of files) {
+    try {
+      const attachment = await window.llamaDesktop.buildPastedAttachment(file.path)
+      if (attachment) {
+        state.attachments = [...state.attachments, attachment]
+      }
+    } catch { /* skip failed paste */ }
+  }
+
+  // Handle image data (from screenshot tools — no file path)
+  for (const item of imageItems) {
+    try {
+      const blob = item.getAsFile()
+      if (!blob) continue
+      const buffer = await blob.arrayBuffer()
+      const attachment = await window.llamaDesktop.buildImageAttachment(
+        Array.from(new Uint8Array(buffer)),
+        blob.type
+      )
+      if (attachment) {
+        state.attachments = [...state.attachments, attachment]
+      }
+    } catch { /* skip failed paste */ }
+  }
+
+  if (state.attachments.length) render()
+})
 
 async function init() {
   try {
@@ -2663,8 +2522,8 @@ async function init() {
       if (state.view === 'settings' && state.active === 'mcp') render({ preserveChatScroll: true })
       return
     }
-    if (payload.type === 'logs') {
-      state.logs = payload.logs
+    if (payload.type === 'logs-delta') {
+      state.logs = [...state.logs, ...(payload.entries || [])].slice(-1200)
       if (state.view === 'terminal') render({ preserveChatScroll: true })
       return
     }
